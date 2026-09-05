@@ -6,8 +6,6 @@ import { AiScannerHero } from "./AiScannerHero";
 import { CategoryGrid } from "./CategoryGrid";
 import { VerifiedTechList } from "./VerifiedTechList";
 import { FixiCareBanner } from "./FixiCareBanner";
-import { LocationModal } from "./LocationModal";
-import { EmergencyModal } from "./EmergencyModal";
 import { useFixiStore } from "@/store/useFixiStore";
 import { Sparkles, ArrowRight, ShieldCheck } from "lucide-react";
 
@@ -59,10 +57,6 @@ export const HomeView: React.FC = () => {
 
       {/* FixiCare Warranty Guarantee */}
       <FixiCareBanner />
-
-      {/* Global Modals */}
-      <LocationModal />
-      <EmergencyModal />
     </div>
   );
 };

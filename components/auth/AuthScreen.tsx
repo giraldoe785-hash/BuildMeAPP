@@ -15,14 +15,21 @@ export const AuthScreen: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col justify-center p-4 sm:p-6">
       <div className="w-full max-w-md mx-auto space-y-4">
-        {/* Brand Header */}
+        {/* Brand Header con Imagen de Identidad Oficial */}
         <div className="text-center space-y-2">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center mx-auto shadow-xl shadow-emerald-600/30 border border-emerald-400/40">
-            <Wrench className="w-7 h-7" />
+          {/* Logotipo Oficial de BuildMe */}
+          <div className="relative w-28 h-28 sm:w-32 sm:h-32 mx-auto rounded-3xl overflow-hidden shadow-xl shadow-emerald-950/40 border border-slate-700/60 bg-white p-1.5 transition-transform hover:scale-105 duration-200">
+            <img
+              src="/buildme-logo.png"
+              alt="Logotipo oficial de BuildMe - Desde 2026"
+              className="w-full h-full object-contain"
+              loading="eager"
+            />
           </div>
+
           <div>
-            <h1 className="text-2xl font-black text-white tracking-tight">
-              BuildMeAPP <span className="text-emerald-400 font-mono text-base font-normal">| Fixi</span>
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              BuildMeAPP <span className="text-emerald-400 font-mono text-sm sm:text-base font-normal">| Fixi</span>
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
               Servicios del hogar bajo demanda & Diagnóstico con IA

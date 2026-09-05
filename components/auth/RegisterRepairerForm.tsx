@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useState } from "react";
-import { useAuthStore } from "@/store/useAuthStore";
+import { useAuthStore, validateRegistrationPassword, PASSWORD_VALIDATION_ERROR_MESSAGE } from "@/store/useAuthStore";
 import { SERVICE_CATEGORIES } from "@/data/services";
 import { ServiceCategoryId } from "@/types";
 import { User, Lock, CreditCard, Wrench, Upload, FileText, AlertCircle, Clock, CheckCircle2, UserPlus, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { PasswordRequirements } from "./PasswordRequirements";
 
 interface RegisterRepairerFormProps {
   onSwitchToLogin: () => void;
@@ -30,6 +31,8 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const passwordValidation = validateRegistrationPassword(password);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -73,8 +76,8 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
       return;
     }
 
-    if (password.length < 4) {
-      setErrorMessage("La contraseña debe contener al menos 4 caracteres.");
+    if (!passwordValidation.isValid) {
+      setErrorMessage(PASSWORD_VALIDATION_ERROR_MESSAGE);
       return;
     }
 
@@ -281,6 +284,9 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
           </div>
         </div>
 
+        {/* Indicador de requisitos en tiempo real */}
+        <PasswordRequirements validation={passwordValidation} />
+
         {/* Error alert */}
         {errorMessage && (
           <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-center gap-2">
@@ -296,6 +302,7 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
           size="lg"
           className="w-full flex items-center justify-center gap-2 shadow-md shadow-orange-500/25"
           isLoading={isLoading}
+          disabled={!passwordValidation.isValid}
         >
           <UserPlus className="w-4 h-4" />
           <span>Crear Cuenta de Reparador</span>

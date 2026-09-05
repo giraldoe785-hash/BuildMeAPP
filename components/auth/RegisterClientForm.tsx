@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
-import { useAuthStore } from "@/store/useAuthStore";
+import { useAuthStore, validateRegistrationPassword, PASSWORD_VALIDATION_ERROR_MESSAGE } from "@/store/useAuthStore";
 import { User, Lock, UserPlus, AlertCircle, CheckCircle2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { PasswordRequirements } from "./PasswordRequirements";
 
 interface RegisterClientFormProps {
   onSwitchToLogin: () => void;
@@ -18,6 +19,8 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
   const [confirmPassword, setConfirmPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const passwordValidation = validateRegistrationPassword(password);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,8 +37,8 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
       return;
     }
 
-    if (password.length < 4) {
-      setErrorMessage("La contraseña debe contener al menos 4 caracteres.");
+    if (!passwordValidation.isValid) {
+      setErrorMessage(PASSWORD_VALIDATION_ERROR_MESSAGE);
       return;
     }
 
@@ -134,6 +137,9 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
               className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
           </div>
+
+          {/* Indicador de requisitos en tiempo real */}
+          <PasswordRequirements validation={passwordValidation} />
         </div>
 
         {/* Confirmación */}
@@ -172,6 +178,7 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
           size="lg"
           className="w-full flex items-center justify-center gap-2 shadow-md shadow-emerald-600/25"
           isLoading={isLoading}
+          disabled={!passwordValidation.isValid}
         >
           <UserPlus className="w-4 h-4" />
           <span>Crear Cuenta de Cliente</span>

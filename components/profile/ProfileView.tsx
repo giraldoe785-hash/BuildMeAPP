@@ -71,8 +71,10 @@ export const ProfileView: React.FC = () => {
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setLocationModalOpen(true)}
-            className="text-xs font-bold text-emerald-600"
+            className="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline px-2.5 py-1 rounded-xl hover:bg-emerald-50 transition-colors shrink-0"
+            aria-label="Cambiar dirección principal"
           >
             Cambiar
           </button>

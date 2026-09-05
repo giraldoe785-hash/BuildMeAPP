@@ -12,6 +12,8 @@ import { OrdersView } from "@/components/orders/OrdersView";
 import { ProfileView } from "@/components/profile/ProfileView";
 import { AuthScreen } from "@/components/auth/AuthScreen";
 import { RepairerDashboard } from "@/components/repairer/RepairerDashboard";
+import { LocationModal } from "@/components/home/LocationModal";
+import { EmergencyModal } from "@/components/home/EmergencyModal";
 import { AnimatePresence, motion } from "framer-motion";
 
 export default function App() {
@@ -126,6 +128,10 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Global Modals & Drawers */}
+        <LocationModal />
+        <EmergencyModal />
 
         {/* Floating Bottom Navigation Bar (Oculta sólo dentro del Wizard para foco de checkout) */}
         {activeTab !== "wizard" && <BottomNav />}

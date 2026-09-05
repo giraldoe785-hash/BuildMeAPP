@@ -6,6 +6,26 @@ export interface StoredUserAccount extends AuthUser {
   passwordHash: string; // Simulación de hash local en frontend
 }
 
+export interface PasswordValidationResult {
+  isValid: boolean;
+  hasMinLength: boolean;
+  hasMinTwoNumbers: boolean;
+}
+
+export const validateRegistrationPassword = (password: string): PasswordValidationResult => {
+  const hasMinLength = password.length >= 7;
+  const numbersCount = (password.match(/\d/g) || []).length;
+  const hasMinTwoNumbers = numbersCount >= 2;
+  return {
+    isValid: hasMinLength && hasMinTwoNumbers,
+    hasMinLength,
+    hasMinTwoNumbers,
+  };
+};
+
+export const PASSWORD_VALIDATION_ERROR_MESSAGE =
+  "La contraseña debe tener mínimo 7 caracteres y contener al menos 2 números.";
+
 export interface AuthState {
   currentUser: AuthUser | null;
   isAuthenticated: boolean;
@@ -117,8 +137,8 @@ export const useAuthStore = create<AuthState>()(
           return { success: false, message: "El usuario debe tener al menos 3 caracteres." };
         }
 
-        if (password.length < 4) {
-          return { success: false, message: "La contraseña debe tener al menos 4 caracteres." };
+        if (!validateRegistrationPassword(password).isValid) {
+          return { success: false, message: PASSWORD_VALIDATION_ERROR_MESSAGE };
         }
 
         if (password !== confirmPassword) {
@@ -182,8 +202,8 @@ export const useAuthStore = create<AuthState>()(
           return { success: false, message: "Ingresa un número de cédula válido." };
         }
 
-        if (password.length < 4) {
-          return { success: false, message: "La contraseña debe tener al menos 4 caracteres." };
+        if (!validateRegistrationPassword(password).isValid) {
+          return { success: false, message: PASSWORD_VALIDATION_ERROR_MESSAGE };
         }
 
         if (password !== confirmPassword) {
