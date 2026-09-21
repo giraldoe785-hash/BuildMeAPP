@@ -89,9 +89,13 @@ export const LiveTrackingView: React.FC = () => {
 
           <div className="flex items-start gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-200/70">
             <img
-              src={activeOrder.diagnosis.thumbnailUrl}
+              src={
+                "thumbnailUrl" in activeOrder.diagnosis
+                  ? activeOrder.diagnosis.thumbnailUrl
+                  : "/buildme-logo.png"
+              }
               alt={activeOrder.diagnosis.title}
-              className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
+              className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0 bg-white"
             />
             <div className="min-w-0">
               <p className="text-xs font-bold text-slate-900 line-clamp-1">

@@ -2,9 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import {
-  APIProvider,
   Map,
-  Marker,
+  AdvancedMarker,
+  useApiIsLoaded,
 } from "@vis.gl/react-google-maps";
 import { useFixiStore } from "@/store/useFixiStore";
 import { Layers, MapPin } from "lucide-react";
@@ -18,8 +18,8 @@ export const InteractiveMap: React.FC = () => {
   const { activeOrder } = useFixiStore();
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const mapLoaded = useApiIsLoaded();
 
-  const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
 
   /*
@@ -94,28 +94,8 @@ export const InteractiveMap: React.FC = () => {
   return (
     <div className="relative w-full h-[360px] overflow-hidden bg-slate-900 select-none">
 
-      <APIProvider
-        apiKey={apiKey}
-        onLoad={() => {
-          console.log(
-            "[BuildMeApp] Google Maps JavaScript API cargada correctamente."
-          );
-          setMapLoaded(true);
-        }}
-        onError={(error) => {
-          console.error(
-            "[BuildMeApp] Error cargando Google Maps:",
-            error
-          );
-
-          setMapError(
-            error instanceof Error
-              ? error.message
-              : "Error desconocido al cargar Google Maps"
-          );
-        }}
-      >
         <Map
+          mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID || "DEMO_MAP_ID"}
           defaultCenter={destination}
           defaultZoom={14}
           gestureHandling="greedy"
@@ -131,7 +111,7 @@ export const InteractiveMap: React.FC = () => {
           }}
         >
           {/* Domicilio */}
-          <Marker
+          <AdvancedMarker
             position={destination}
             title={
               activeOrder?.location?.name ??
@@ -141,33 +121,29 @@ export const InteractiveMap: React.FC = () => {
 
           {/* Técnico simulado */}
           {activeOrder?.status === "on_the_way" && (
-            <Marker
+            <AdvancedMarker
               position={technicianPosition}
               title={`Técnico en ${vehicleType}`}
-              label={{
-                text:
-                  vehicleType === "Moto"
-                    ? "🏍️"
-                    : "🚐",
-                fontSize: "22px",
-              }}
-            />
+            >
+              <div style={{ fontSize: "22px", lineHeight: 1 }}>
+                {vehicleType === "Moto" ? "🏍️" : "🚐"}
+              </div>
+            </AdvancedMarker>
           )}
 
           {/* Técnico en sitio */}
           {(activeOrder?.status === "in_progress" ||
             activeOrder?.status === "completed") && (
-            <Marker
+            <AdvancedMarker
               position={destination}
               title="Técnico en el sitio"
-              label={{
-                text: "🛠️",
-                fontSize: "22px",
-              }}
-            />
+            >
+              <div style={{ fontSize: "22px", lineHeight: 1 }}>
+                🛠️
+              </div>
+            </AdvancedMarker>
           )}
         </Map>
-      </APIProvider>
 
       {/* Estado superior */}
       <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
@@ -218,4 +194,3 @@ export const InteractiveMap: React.FC = () => {
     </div>
   );
 };
-

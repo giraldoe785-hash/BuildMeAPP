@@ -17,6 +17,7 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     requiredMaterials: ["Sifón flexible 1 1/4", "Empaque O-Ring NBR", "Cinta Teflón alta densidad"],
     estimatedHours: 1.2,
     priceFixed: 48.50,
+    method: "Caso_Predefinido",
   },
   {
     id: "preset-electrico-breaker",
@@ -34,6 +35,7 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     requiredMaterials: ["Interruptor Termomagnético 20A Square D", "Terminales bimetálicas", "Aislante 3M"],
     estimatedHours: 1.5,
     priceFixed: 62.00,
+    method: "Caso_Predefinido",
   },
   {
     id: "preset-cerrajeria-traba",
@@ -51,6 +53,7 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     requiredMaterials: ["Cilindro de seguridad 70mm con embrague", "Pernos de acero templado"],
     estimatedHours: 0.8,
     priceFixed: 55.00,
+    method: "Caso_Predefinido",
   },
   {
     id: "preset-filtracion-humedad",
@@ -69,5 +72,6 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     estimatedHours: 3.0,
     priceRangeMin: 75.00,
     priceRangeMax: 140.00,
+    method: "Caso_Predefinido",
   },
 ];

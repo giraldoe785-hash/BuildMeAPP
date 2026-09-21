@@ -3,6 +3,9 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import {
   ServiceCategoryId,
   AiDiagnosisPreset,
+  AiDiagnosisResult,
+  DiagnosisStatus,
+  DiagnosisMethod,
   Technician,
   ActiveOrder,
   OrderStatus,
@@ -36,10 +39,13 @@ export interface FixiState {
   // Wizard state
   wizardStep: 1 | 2 | 3;
   selectedCategoryForWizard: ServiceCategoryId;
-  currentDiagnosis: AiDiagnosisPreset | null;
+  currentDiagnosis: AiDiagnosisPreset | AiDiagnosisResult | null;
   uploadedMediaUrl: string | null;
   userPromptInput: string;
   isAiAnalyzing: boolean;
+  diagnosisStatus: DiagnosisStatus;
+  diagnosisError: string | null;
+  diagnosisMethod: DiagnosisMethod | null;
   scheduleType: "immediate" | "scheduled";
   scheduledDate: string;
   scheduledTimeSlot: string;
@@ -75,7 +81,11 @@ export interface FixiState {
   setWizardStep: (step: 1 | 2 | 3) => void;
   setUserPromptInput: (prompt: string) => void;
   setUploadedMediaUrl: (url: string | null) => void;
-  runAiDiagnosis: (presetId?: string) => Promise<void>;
+  selectPresetDiagnosis: (presetId: string) => void;
+  setAiDiagnosisResult: (result: AiDiagnosisResult) => void;
+  setAiDiagnosisLoading: () => void;
+  setAiDiagnosisError: (error: string) => void;
+  resetDiagnosis: () => void;
   setScheduleDetails: (type: "immediate" | "scheduled", date?: string, timeSlot?: string) => void;
   setLocationNotes: (notes: string) => void;
   setPaymentMethod: (method: "card" | "apple_pay" | "cash_pos" | "fixi_wallet") => void;
@@ -83,6 +93,7 @@ export interface FixiState {
   
   // Booking & Live Tracking Actions
   confirmBookingAndHoldFunds: () => void;
+  acceptOrder: (techName?: string) => void;
   setOrderStatus: (status: OrderStatus) => void;
   validateOtpCode: (code: string) => boolean;
   simulateExtraCostProposal: () => void;
@@ -135,10 +146,13 @@ export const useFixiStore = create<FixiState>()(
 
       wizardStep: 1,
       selectedCategoryForWizard: "electricidad",
-      currentDiagnosis: AI_DIAGNOSIS_PRESETS[0],
-      uploadedMediaUrl: AI_DIAGNOSIS_PRESETS[0].thumbnailUrl,
-      userPromptInput: AI_DIAGNOSIS_PRESETS[0].userPrompt,
+      currentDiagnosis: null,
+      uploadedMediaUrl: null,
+      userPromptInput: "",
       isAiAnalyzing: false,
+      diagnosisStatus: "idle" as DiagnosisStatus,
+      diagnosisError: null,
+      diagnosisMethod: null,
       scheduleType: "immediate",
       scheduledDate: new Date().toISOString().split("T")[0],
       scheduledTimeSlot: "10:00 AM - 12:00 PM",
@@ -174,19 +188,23 @@ export const useFixiStore = create<FixiState>()(
 
       startWizard: (categoryId, presetId) => {
         const cat = categoryId || "electricidad";
-        const matchedPreset =
-          (presetId && AI_DIAGNOSIS_PRESETS.find((p) => p.id === presetId)) ||
-          AI_DIAGNOSIS_PRESETS.find((p) => p.category === cat) ||
-          AI_DIAGNOSIS_PRESETS[0];
+
+        // If a specific preset was requested (e.g. from HomeView shortcut), select it directly
+        const matchedPreset = presetId
+          ? AI_DIAGNOSIS_PRESETS.find((p) => p.id === presetId) || null
+          : null;
 
         set({
           activeTab: "wizard",
           wizardStep: 1,
           selectedCategoryForWizard: cat,
           currentDiagnosis: matchedPreset,
-          uploadedMediaUrl: matchedPreset.thumbnailUrl,
-          userPromptInput: matchedPreset.userPrompt,
+          uploadedMediaUrl: null,
+          userPromptInput: "",
           isAiAnalyzing: false,
+          diagnosisStatus: matchedPreset ? ("success" as DiagnosisStatus) : ("idle" as DiagnosisStatus),
+          diagnosisError: null,
+          diagnosisMethod: matchedPreset ? ("Caso_Predefinido" as DiagnosisMethod) : null,
           discountApplied: 0,
           promoCode: "",
         });
@@ -196,29 +214,55 @@ export const useFixiStore = create<FixiState>()(
       setUserPromptInput: (prompt) => set({ userPromptInput: prompt }),
       setUploadedMediaUrl: (url) => set({ uploadedMediaUrl: url }),
 
-      runAiDiagnosis: async (presetId) => {
-        set({ isAiAnalyzing: true });
-        
-        await new Promise((resolve) => setTimeout(resolve, 2200));
-
-        let nextDiagnosis: AiDiagnosisPreset;
-        if (presetId) {
-          nextDiagnosis =
-            AI_DIAGNOSIS_PRESETS.find((p) => p.id === presetId) ||
-            AI_DIAGNOSIS_PRESETS[0];
-        } else {
-          // Select based on category or first preset
-          const currentCat = get().selectedCategoryForWizard;
-          nextDiagnosis =
-            AI_DIAGNOSIS_PRESETS.find((p) => p.category === currentCat) ||
-            AI_DIAGNOSIS_PRESETS[0];
-        }
-
+      selectPresetDiagnosis: (presetId) => {
+        const preset =
+          AI_DIAGNOSIS_PRESETS.find((p) => p.id === presetId) ||
+          AI_DIAGNOSIS_PRESETS[0];
         set({
-          currentDiagnosis: nextDiagnosis,
-          uploadedMediaUrl: nextDiagnosis.thumbnailUrl,
-          userPromptInput: nextDiagnosis.userPrompt,
+          currentDiagnosis: preset,
           isAiAnalyzing: false,
+          diagnosisStatus: "success" as DiagnosisStatus,
+          diagnosisError: null,
+          diagnosisMethod: "Caso_Predefinido" as DiagnosisMethod,
+        });
+      },
+
+      setAiDiagnosisResult: (result) => {
+        set({
+          currentDiagnosis: result,
+          isAiAnalyzing: false,
+          diagnosisStatus: "success" as DiagnosisStatus,
+          diagnosisError: null,
+          diagnosisMethod: "Análisis_IA" as DiagnosisMethod,
+        });
+      },
+
+      setAiDiagnosisLoading: () => {
+        set({
+          isAiAnalyzing: true,
+          diagnosisStatus: "loading" as DiagnosisStatus,
+          diagnosisError: null,
+          currentDiagnosis: null,
+        });
+      },
+
+      setAiDiagnosisError: (error) => {
+        set({
+          isAiAnalyzing: false,
+          diagnosisStatus: "error" as DiagnosisStatus,
+          diagnosisError: error,
+          currentDiagnosis: null,
+        });
+      },
+
+      resetDiagnosis: () => {
+        set({
+          currentDiagnosis: null,
+          isAiAnalyzing: false,
+          diagnosisStatus: "idle" as DiagnosisStatus,
+          diagnosisError: null,
+          diagnosisMethod: null,
+          uploadedMediaUrl: null,
         });
       },
 
@@ -299,29 +343,33 @@ export const useFixiStore = create<FixiState>()(
           activeOrder: newOrder,
           activeTab: "tracking",
         });
+      },
 
-        // Trigger transition to on_the_way after 3 seconds
-        setTimeout(() => {
-          if (get().activeOrder?.status === "finding_tech") {
-            set((s) => ({
-              activeOrder: s.activeOrder
-                ? {
-                    ...s.activeOrder,
-                    status: "on_the_way",
-                    chatMessages: [
-                      ...s.activeOrder.chatMessages,
-                      {
-                        id: `msg-${Date.now()}`,
-                        sender: "technician",
-                        text: `¡Hola! Soy ${assignedTech.name}. Ya voy en camino con las herramientas y refacciones necesarias. Estimo llegar en unos 14 minutos.`,
-                        timestamp: "Ahora",
-                      },
-                    ],
-                  }
-                : null,
-            }));
-          }
-        }, 3200);
+      acceptOrder: (techName?: string) => {
+        const state = get();
+        if (!state.activeOrder) return;
+        const assignedName = techName || state.activeOrder.technician.name;
+        const alreadyHasTechMsg = state.activeOrder.chatMessages.some((m) => m.sender === "technician");
+
+        const chatMessages = alreadyHasTechMsg
+          ? state.activeOrder.chatMessages
+          : [
+              ...state.activeOrder.chatMessages,
+              {
+                id: `msg-${Date.now()}`,
+                sender: "technician" as const,
+                text: `¡Hola! Soy ${assignedName}. He aceptado tu solicitud y ya voy en camino con las herramientas y refacciones necesarias. Estimo llegar en unos 14 minutos.`,
+                timestamp: "Ahora",
+              },
+            ];
+
+        set({
+          activeOrder: {
+            ...state.activeOrder,
+            status: "on_the_way",
+            chatMessages,
+          },
+        });
       },
 
       setOrderStatus: (status) =>
@@ -332,11 +380,25 @@ export const useFixiStore = create<FixiState>()(
               ? true
               : state.activeOrder.isOtpValidated;
 
+          let chatMessages = state.activeOrder.chatMessages;
+          if (status === "on_the_way" && !chatMessages.some((m) => m.sender === "technician")) {
+            chatMessages = [
+              ...chatMessages,
+              {
+                id: `msg-${Date.now()}`,
+                sender: "technician",
+                text: `¡Hola! Soy ${state.activeOrder.technician.name}. He aceptado tu solicitud y ya voy en camino con las herramientas y refacciones necesarias. Estimo llegar en unos 14 minutos.`,
+                timestamp: "Ahora",
+              },
+            ];
+          }
+
           return {
             activeOrder: {
               ...state.activeOrder,
               status,
               isOtpValidated,
+              chatMessages,
             },
           };
         }),

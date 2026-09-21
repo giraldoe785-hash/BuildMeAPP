@@ -10,6 +10,7 @@ export const TechnicianSheet: React.FC = () => {
     activeOrder,
     setChatModalOpen,
     setOrderStatus,
+    acceptOrder,
     simulateExtraCostProposal,
     setCompletionModalOpen,
     setEmergencyModalOpen,
@@ -100,9 +101,9 @@ export const TechnicianSheet: React.FC = () => {
               variant="primary"
               size="sm"
               className="col-span-2"
-              onClick={() => setOrderStatus("on_the_way")}
+              onClick={() => acceptOrder()}
             >
-              <span>Simular: Técnico Asignado y en camino</span>
+              <span>Simular: Técnico Acepta Solicitud y va en camino</span>
             </Button>
           )}
 

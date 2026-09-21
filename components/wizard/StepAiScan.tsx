@@ -1,11 +1,139 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { useFixiStore } from "@/store/useFixiStore";
 import { AI_DIAGNOSIS_PRESETS } from "@/data/aiPresets";
-import { Sparkles, Camera, Upload, Mic, Video, CheckCircle2, AlertCircle, Wrench, Clock, ShieldCheck, ArrowRight, RefreshCw } from "lucide-react";
+import {
+  Sparkles,
+  Camera,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+  Wrench,
+  Clock,
+  ArrowRight,
+  RefreshCw,
+  X,
+  ImageIcon,
+  Video,
+} from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ConfidenceBadge } from "@/components/ui/ConfidenceBadge";
+import type { AiDiagnosisResult } from "@/types";
+
+const ALLOWED_MIMES = ["image/jpeg", "image/png", "video/mp4"];
+const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB
+const MAX_VIDEO_DURATION = 15; // seconds
+
+/**
+ * Validates video duration using HTMLVideoElement.
+ * Returns a promise that resolves to true if valid, or rejects with an error message.
+ */
+function validateVideoDuration(file: File): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    const url = URL.createObjectURL(file);
+    video.src = url;
+
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      if (video.duration > MAX_VIDEO_DURATION) {
+        reject(
+          `El video dura ${Math.ceil(video.duration)}s. El máximo permitido es ${MAX_VIDEO_DURATION}s.`
+        );
+      } else {
+        resolve(true);
+      }
+    };
+
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject("No se pudo leer la duración del video.");
+    };
+  });
+}
+
+/**
+ * Optimizes image client-side only if dimensions or size are excessive.
+ * Preserves already optimized images. Does not convert video.
+ * - Max dimension: 1280px maintaining aspect ratio
+ * - Quality: 0.80 JPEG
+ */
+function optimizeImageIfNeeded(file: File): Promise<File> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith("image/")) {
+      resolve(file);
+      return;
+    }
+
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.src = url;
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const MAX_SIDE = 1280;
+      const { width, height } = img;
+
+      // If dimensions are within 1280px and size is reasonable, preserve original
+      if (width <= MAX_SIDE && height <= MAX_SIDE && file.size <= 800 * 1024) {
+        resolve(file);
+        return;
+      }
+
+      let targetWidth = width;
+      let targetHeight = height;
+
+      if (width > MAX_SIDE || height > MAX_SIDE) {
+        if (width > height) {
+          targetWidth = MAX_SIDE;
+          targetHeight = Math.round((height * MAX_SIDE) / width);
+        } else {
+          targetHeight = MAX_SIDE;
+          targetWidth = Math.round((width * MAX_SIDE) / height);
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const optimizedFile = new File(
+            [blob],
+            file.name.replace(/\.[^.]+$/, ".jpg"),
+            {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            }
+          );
+          resolve(optimizedFile);
+        },
+        "image/jpeg",
+        0.8
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+  });
+}
 
 export const StepAiScan: React.FC = () => {
   const {
@@ -13,26 +141,157 @@ export const StepAiScan: React.FC = () => {
     uploadedMediaUrl,
     userPromptInput,
     isAiAnalyzing,
+    diagnosisStatus,
+    diagnosisError,
     setUserPromptInput,
     setUploadedMediaUrl,
-    runAiDiagnosis,
+    selectPresetDiagnosis,
+    setAiDiagnosisResult,
+    setAiDiagnosisLoading,
+    setAiDiagnosisError,
+    resetDiagnosis,
     setWizardStep,
     selectedCategoryForWizard,
   } = useFixiStore();
 
-  const [activeTabMedia, setActiveTabMedia] = useState<"preset" | "upload">("preset");
+  const [activeTabMedia, setActiveTabMedia] = useState<"preset" | "upload">(
+    "preset"
+  );
   const [tempPrompt, setTempPrompt] = useState(userPromptInput || "");
+  const [clientValidationError, setClientValidationError] = useState<
+    string | null
+  >(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<"image" | "video" | null>(
+    null
+  );
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSelectPreset = (presetId: string) => {
-    runAiDiagnosis(presetId);
+    setClientValidationError(null);
+    selectPresetDiagnosis(presetId);
   };
 
-  const handleSimulateCustomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTabChange = (tab: "preset" | "upload") => {
+    setActiveTabMedia(tab);
+    setClientValidationError(null);
+    // Reset diagnosis when switching modes
+    resetDiagnosis();
+    clearPreview();
+  };
+
+  const clearPreview = useCallback(() => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewUrl(null);
+    setPreviewType(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [previewUrl]);
+
+  const handleFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const fakeUrl = URL.createObjectURL(file);
-      setUploadedMediaUrl(fakeUrl);
-      runAiDiagnosis();
+    if (!file) return;
+
+    setClientValidationError(null);
+
+    // Client-side MIME validation
+    if (!ALLOWED_MIMES.includes(file.type)) {
+      setClientValidationError(
+        `Formato no permitido (${file.type}). Solo se aceptan: JPG, PNG, MP4.`
+      );
+      return;
+    }
+
+    // Client-side size validation
+    if (file.size > MAX_FILE_SIZE) {
+      setClientValidationError(
+        `El archivo excede 30 MB (${(file.size / 1024 / 1024).toFixed(1)} MB).`
+      );
+      return;
+    }
+
+    // Client-side video duration validation
+    if (file.type === "video/mp4") {
+      try {
+        await validateVideoDuration(file);
+      } catch (durationError) {
+        setClientValidationError(durationError as string);
+        return;
+      }
+    }
+
+    // Create local preview
+    const localUrl = URL.createObjectURL(file);
+    setPreviewUrl(localUrl);
+    setPreviewType(file.type.startsWith("video/") ? "video" : "image");
+    setUploadedMediaUrl(localUrl);
+
+    // Optimize image if dimensions or size are excessive (preserves already optimized files)
+    let fileToSend = file;
+    if (file.type.startsWith("image/")) {
+      try {
+        fileToSend = await optimizeImageIfNeeded(file);
+      } catch {
+        fileToSend = file;
+      }
+    }
+
+    // Send to API route
+    await sendToGemini(fileToSend);
+  };
+
+  const sendToGemini = async (file: File) => {
+    setAiDiagnosisLoading();
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("category", selectedCategoryForWizard);
+      if (tempPrompt.trim()) {
+        formData.append("userPrompt", tempPrompt.trim());
+      }
+
+      const response = await fetch("/api/ai-diagnosis", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setAiDiagnosisError(
+          data.error || "Error desconocido al analizar la evidencia."
+        );
+        return;
+      }
+
+      // Success — data is an AiDiagnosisResult
+      setAiDiagnosisResult(data as AiDiagnosisResult);
+    } catch {
+      setAiDiagnosisError(
+        "Error de conexión. Verifica tu conexión a internet e intenta de nuevo."
+      );
+    }
+  };
+
+  const handleRetry = async () => {
+    if (fileInputRef.current?.files?.[0]) {
+      const file = fileInputRef.current.files[0];
+      let fileToSend = file;
+      if (file.type.startsWith("image/")) {
+        try {
+          fileToSend = await optimizeImageIfNeeded(file);
+        } catch {
+          fileToSend = file;
+        }
+      }
+      sendToGemini(fileToSend);
     }
   };
 
@@ -40,6 +299,9 @@ export const StepAiScan: React.FC = () => {
     setUserPromptInput(tempPrompt);
     setWizardStep(2);
   };
+
+  const canContinue =
+    diagnosisStatus === "success" && currentDiagnosis !== null;
 
   return (
     <div className="space-y-4">
@@ -53,24 +315,24 @@ export const StepAiScan: React.FC = () => {
 
           <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl text-[11px]">
             <button
-              onClick={() => setActiveTabMedia("preset")}
+              onClick={() => handleTabChange("preset")}
               className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
                 activeTabMedia === "preset"
                   ? "bg-white text-slate-900 shadow-xs font-bold"
                   : "text-slate-500 hover:text-slate-800"
               }`}
             >
-              Ejemplos
+              Problema predefinido
             </button>
             <button
-              onClick={() => setActiveTabMedia("upload")}
+              onClick={() => handleTabChange("upload")}
               className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
                 activeTabMedia === "upload"
                   ? "bg-white text-slate-900 shadow-xs font-bold"
                   : "text-slate-500 hover:text-slate-800"
               }`}
             >
-              Subir Archivo
+              Analizar daño
             </button>
           </div>
         </div>
@@ -78,11 +340,14 @@ export const StepAiScan: React.FC = () => {
         {activeTabMedia === "preset" ? (
           <div className="space-y-2">
             <p className="text-[11px] text-slate-500">
-              Selecciona una avería modelo para simular el análisis en tiempo real:
+              Selecciona un problema común para obtener diagnóstico y
+              cotización instantáneos:
             </p>
             <div className="grid grid-cols-2 gap-2">
               {AI_DIAGNOSIS_PRESETS.map((preset) => {
-                const isSelected = currentDiagnosis?.id === preset.id;
+                const isSelected = currentDiagnosis?.title === preset.title &&
+                  diagnosisStatus === "success" &&
+                  ("id" in currentDiagnosis && currentDiagnosis.id === preset.id);
                 return (
                   <button
                     key={preset.id}
@@ -111,7 +376,10 @@ export const StepAiScan: React.FC = () => {
 
                     <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-100/80">
                       <span className="text-slate-500 font-medium">
-                        Certeza: <strong className="text-slate-800">{preset.confidenceScore}%</strong>
+                        Certeza:{" "}
+                        <strong className="text-slate-800">
+                          {preset.confidenceScore}%
+                        </strong>
                       </span>
                       <span className="text-emerald-700 font-bold">
                         {preset.pricingType === "guaranteed_fixed"
@@ -126,24 +394,83 @@ export const StepAiScan: React.FC = () => {
           </div>
         ) : (
           /* Custom Upload Dropzone */
-          <div className="relative border-2 border-dashed border-emerald-300 bg-emerald-50/30 rounded-2xl p-6 text-center hover:bg-emerald-50/50 transition-colors">
-            <input
-              type="file"
-              accept="image/*,video/*,audio/*"
-              onChange={handleSimulateCustomUpload}
-              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-            />
-            <div className="flex flex-col items-center">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 shadow-xs">
-                <Upload className="w-6 h-6" />
+          <div className="space-y-3">
+            {/* Preview area */}
+            {previewUrl && previewType ? (
+              <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-100">
+                {previewType === "image" ? (
+                  <img
+                    src={previewUrl}
+                    alt="Preview de evidencia"
+                    className="w-full h-40 object-cover"
+                  />
+                ) : (
+                  <video
+                    src={previewUrl}
+                    controls
+                    className="w-full h-40 object-cover"
+                  />
+                )}
+                <button
+                  onClick={() => {
+                    clearPreview();
+                    resetDiagnosis();
+                  }}
+                  className="absolute top-2 right-2 p-1 bg-slate-900/70 text-white rounded-full hover:bg-slate-900/90 transition-colors"
+                  title="Quitar archivo"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+
+                <div className="absolute bottom-2 left-2">
+                  <span className="bg-slate-900/70 text-white text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    {previewType === "image" ? (
+                      <ImageIcon className="w-3 h-3" />
+                    ) : (
+                      <Video className="w-3 h-3" />
+                    )}
+                    {previewType === "image" ? "Imagen" : "Video"}
+                  </span>
+                </div>
               </div>
-              <p className="text-xs font-bold text-slate-800">
-                Arrastra o haz clic para subir foto, video o audio
-              </p>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Formatos: JPG, PNG, MP4, MP3 (Máx 25MB)
-              </p>
-            </div>
+            ) : (
+              <div className="relative border-2 border-dashed border-emerald-300 bg-emerald-50/30 rounded-2xl p-6 text-center hover:bg-emerald-50/50 transition-colors">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,video/mp4"
+                  capture="environment"
+                  onChange={handleFileUpload}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <div className="flex flex-col items-center">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 shadow-xs">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <p className="text-xs font-bold text-slate-800">
+                    Toca para tomar foto o subir archivo
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Formatos: JPG, PNG, MP4 (Máx 30MB, video máx 15s)
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Client-side validation error */}
+            {clientValidationError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs font-bold text-red-800">
+                    Archivo no válido
+                  </p>
+                  <p className="text-[11px] text-red-600 mt-0.5">
+                    {clientValidationError}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -162,12 +489,12 @@ export const StepAiScan: React.FC = () => {
         </div>
       </div>
 
-      {/* AI Scanner Analysis Card */}
-      {isAiAnalyzing ? (
+      {/* AI Scanner Analysis Card — Loading State */}
+      {isAiAnalyzing && (
         <div className="p-6 bg-slate-900 text-white rounded-3xl relative overflow-hidden border border-emerald-500/40 shadow-xl">
           {/* Laser beam animation */}
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-scan-wave" />
-          
+
           <div className="flex flex-col items-center justify-center py-6 text-center space-y-3">
             <div className="relative">
               <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-400 flex items-center justify-center animate-pulse">
@@ -181,13 +508,43 @@ export const StepAiScan: React.FC = () => {
                 Fixi Vision AI analizando falla...
               </h4>
               <p className="text-xs text-emerald-300 font-mono mt-1">
-                Segmentando imagen • Identificando componentes • Calculando costos
+                Segmentando imagen • Identificando componentes • Calculando
+                costos
               </p>
             </div>
           </div>
         </div>
-      ) : currentDiagnosis ? (
-        /* Diagnosis Result Card */
+      )}
+
+      {/* Error State */}
+      {diagnosisStatus === "error" && diagnosisError && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-3xl space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-red-800">
+                Error en el diagnóstico
+              </p>
+              <p className="text-[11px] text-red-600 mt-1 leading-relaxed">
+                {diagnosisError}
+              </p>
+            </div>
+          </div>
+
+          {activeTabMedia === "upload" && (
+            <button
+              onClick={handleRetry}
+              className="flex items-center gap-1.5 text-[11px] font-bold text-red-700 hover:text-red-900 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reintentar análisis
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Diagnosis Result Card */}
+      {diagnosisStatus === "success" && currentDiagnosis && (
         <div className="bg-white rounded-3xl p-4 border border-slate-200/80 shadow-md space-y-3.5">
           {/* Header of Diagnosis */}
           <div className="flex items-start justify-between gap-2">
@@ -206,13 +563,15 @@ export const StepAiScan: React.FC = () => {
               </h3>
             </div>
 
-            <button
-              onClick={() => runAiDiagnosis()}
-              className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
-              title="Volver a escanear"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            {activeTabMedia === "upload" && (
+              <button
+                onClick={handleRetry}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+                title="Volver a escanear"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Root cause and suggested fix */}
@@ -245,7 +604,9 @@ export const StepAiScan: React.FC = () => {
               </div>
               <ul className="text-[11px] text-slate-700 space-y-0.5 list-disc list-inside">
                 {currentDiagnosis.requiredMaterials.map((mat, i) => (
-                  <li key={i} className="truncate">{mat}</li>
+                  <li key={i} className="truncate">
+                    {mat}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -281,12 +642,14 @@ export const StepAiScan: React.FC = () => {
 
             <div className="text-right">
               <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-bold">
-                {currentDiagnosis.pricingType === "guaranteed_fixed" ? "Sin sorpresas" : "Sujeto a sitio"}
+                {currentDiagnosis.pricingType === "guaranteed_fixed"
+                  ? "Sin sorpresas"
+                  : "Sujeto a sitio"}
               </span>
             </div>
           </div>
         </div>
-      ) : null}
+      )}
 
       {/* Step 1 CTA */}
       <div className="pt-2">
@@ -294,7 +657,7 @@ export const StepAiScan: React.FC = () => {
           variant="primary"
           size="lg"
           className="w-full flex items-center justify-center gap-2"
-          disabled={isAiAnalyzing}
+          disabled={!canContinue}
           onClick={handleContinue}
         >
           <span>Paso 2: Agendar & Domicilio</span>

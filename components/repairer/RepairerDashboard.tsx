@@ -10,7 +10,7 @@ import confetti from "canvas-confetti";
 
 export const RepairerDashboard: React.FC = () => {
   const { currentUser, logout } = useAuthStore();
-  const { isOnline } = useFixiStore();
+  const { isOnline, activeOrder, acceptOrder, setOrderStatus, validateOtpCode } = useFixiStore();
 
   const [activeTabRepairer, setActiveTabRepairer] = useState<"requests" | "active_job" | "documents" | "profile">("requests");
   const [acceptedJob, setAcceptedJob] = useState<{
@@ -46,6 +46,7 @@ export const RepairerDashboard: React.FC = () => {
       category: currentUser?.specialty || "electricidad",
       payout: 52.00,
       urgency: "immediate" as const,
+      isLiveStoreOrder: false,
     },
     {
       id: "REQ-902",
@@ -56,12 +57,43 @@ export const RepairerDashboard: React.FC = () => {
       category: currentUser?.specialty || "electricidad",
       payout: 45.00,
       urgency: "scheduled" as const,
+      isLiveStoreOrder: false,
     },
   ];
 
-  const handleAcceptJob = (req: typeof availableRequests[0]) => {
+  // Si hay una orden creada por el cliente esperando asignación de especialista (finding_tech), la mostramos para aceptación
+  const liveClientRequest =
+    activeOrder && activeOrder.status === "finding_tech"
+      ? {
+          id: activeOrder.id,
+          clientName: activeOrder.notes ? `Cliente (${activeOrder.notes.slice(0, 20)}...)` : "Cliente Fixi (En vivo)",
+          address: activeOrder.location.fullAddress,
+          distance: `${activeOrder.technician.distanceKm} km`,
+          issue: activeOrder.diagnosis.title,
+          category: activeOrder.category,
+          payout: activeOrder.pricing.total,
+          urgency: activeOrder.urgencyType,
+          isLiveStoreOrder: true,
+        }
+      : null;
+
+  const allAvailableRequests = liveClientRequest
+    ? [liveClientRequest, ...availableRequests]
+    : availableRequests;
+
+  const handleAcceptJob = (req: (typeof allAvailableRequests)[0]) => {
+    if (req.isLiveStoreOrder) {
+      acceptOrder(currentUser?.name);
+    }
     setAcceptedJob({
-      ...req,
+      id: req.id,
+      clientName: req.clientName,
+      address: req.address,
+      distance: req.distance,
+      issue: req.issue,
+      category: req.category,
+      payout: req.payout,
+      urgency: req.urgency,
       status: "dispatched",
       otpEntered: "",
       isOtpValid: false,
@@ -74,6 +106,9 @@ export const RepairerDashboard: React.FC = () => {
     e.preventDefault();
     // En el demo aceptamos cualquier código de 4 dígitos o el código '8492' / '1234'
     if (otpInput.trim().length >= 4) {
+      if (activeOrder && activeOrder.id === acceptedJob?.id) {
+        validateOtpCode(otpInput.trim());
+      }
       setAcceptedJob((prev) => (prev ? { ...prev, status: "in_progress", isOtpValid: true } : null));
       setOtpError(false);
       setOtpInput("");
@@ -87,6 +122,10 @@ export const RepairerDashboard: React.FC = () => {
     try {
       confetti({ particleCount: 70, spread: 60 });
     } catch (e) {}
+
+    if (activeOrder && activeOrder.id === acceptedJob.id) {
+      setOrderStatus("completed");
+    }
 
     setEarnings((prev) => prev + acceptedJob.payout);
     setCompletedCount((prev) => prev + 1);
@@ -195,7 +234,7 @@ export const RepairerDashboard: React.FC = () => {
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
-            Solicitudes ({availableRequests.length})
+            Solicitudes ({allAvailableRequests.length})
           </button>
           <button
             type="button"
@@ -233,15 +272,27 @@ export const RepairerDashboard: React.FC = () => {
               </span>
             </div>
 
-            {availableRequests.map((req) => (
+            {allAvailableRequests.map((req) => (
               <div
                 key={req.id}
-                className="p-4 bg-white rounded-3xl border border-slate-200/80 shadow-xs space-y-3"
+                className={`p-4 bg-white rounded-3xl border shadow-xs space-y-3 ${
+                  req.isLiveStoreOrder
+                    ? "border-emerald-500 ring-2 ring-emerald-500/20"
+                    : "border-slate-200/80"
+                }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold bg-slate-900 text-white px-2 py-0.5 rounded-full font-mono">
-                    {req.id}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold bg-slate-900 text-white px-2 py-0.5 rounded-full font-mono">
+                      {req.id}
+                    </span>
+                    {req.isLiveStoreOrder && (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Nueva Solicitud
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full border border-orange-200">
                     {req.urgency === "immediate" ? "⚡ Urgente (30 min)" : "📅 Programado"}
                   </span>

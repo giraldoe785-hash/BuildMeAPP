@@ -1,36 +1,20 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useFixiStore } from "@/store/useFixiStore";
-import { Zap, Calendar, Clock, MapPin, Navigation, ArrowLeft, ArrowRight, ShieldCheck, Check } from "lucide-react";
+import { Zap, Calendar, Clock, MapPin, Navigation, ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { APIProvider, Map, Marker, useMap } from "@vis.gl/react-google-maps";
+import {
+  Map,
+  AdvancedMarker,
+  useMap,
+  useAdvancedMarkerRef,
+  useApiIsLoaded,
+} from "@vis.gl/react-google-maps";
 
 const DEFAULT_CENTER = {
   lat: 19.3734,
   lng: -99.1798,
-};
-
-const MapPanController: React.FC<{
-  center: { lat: number; lng: number };
-  recenterTrigger: number;
-}> = ({ center, recenterTrigger }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    if (map) {
-      map.panTo(center);
-    }
-  }, [map, center.lat, center.lng]);
-
-  useEffect(() => {
-    if (map && recenterTrigger > 0) {
-      map.panTo(center);
-      map.setZoom(16);
-    }
-  }, [map, recenterTrigger, center]);
-
-  return null;
 };
 
 const TIME_SLOTS = [
@@ -40,6 +24,82 @@ const TIME_SLOTS = [
   "04:30 PM - 06:30 PM",
   "07:00 PM - 09:00 PM",
 ];
+
+/**
+ * Extrae lat y lng de eventos de mapa o del marcador avanzado de forma segura
+ */
+const extractCoords = (
+  event: any,
+  markerInstance?: google.maps.marker.AdvancedMarkerElement | null
+): { lat: number; lng: number } | null => {
+  let lat: number | null = null;
+  let lng: number | null = null;
+
+  // 1. Evento de mapa de @vis.gl (event.detail.latLng)
+  if (event?.detail?.latLng) {
+    const rawLat = event.detail.latLng.lat;
+    const rawLng = event.detail.latLng.lng;
+    lat = typeof rawLat === "function" ? rawLat() : rawLat;
+    lng = typeof rawLng === "function" ? rawLng() : rawLng;
+  }
+  // 2. Evento nativo de Google Maps (event.latLng)
+  else if (event?.latLng) {
+    const rawLat = event.latLng.lat;
+    const rawLng = event.latLng.lng;
+    lat = typeof rawLat === "function" ? rawLat() : rawLat;
+    lng = typeof rawLng === "function" ? rawLng() : rawLng;
+  }
+  // 3. Posición en la instancia del AdvancedMarkerElement
+  else if (markerInstance?.position) {
+    const pos = markerInstance.position;
+    const rawLat = (pos as any).lat;
+    const rawLng = (pos as any).lng;
+    lat = typeof rawLat === "function" ? rawLat() : rawLat;
+    lng = typeof rawLng === "function" ? rawLng() : rawLng;
+  }
+  // 4. Posición en event.target
+  else if (event?.target?.position) {
+    const pos = event.target.position;
+    const rawLat = pos.lat;
+    const rawLng = pos.lng;
+    lat = typeof rawLat === "function" ? rawLat() : rawLat;
+    lng = typeof rawLng === "function" ? rawLng() : rawLng;
+  }
+
+  if (typeof lat === "number" && typeof lng === "number" && !isNaN(lat) && !isNaN(lng)) {
+    return {
+      lat: Number(lat.toFixed(6)),
+      lng: Number(lng.toFixed(6)),
+    };
+  }
+  return null;
+};
+
+const MapPanController: React.FC<{
+  center: { lat: number; lng: number };
+  recenterTrigger: number;
+  locationName: string;
+  isAdjustingPin: boolean;
+}> = ({ center, recenterTrigger, locationName, isAdjustingPin }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (map && recenterTrigger > 0) {
+      map.panTo(center);
+      map.setZoom(16);
+    }
+  }, [map, recenterTrigger]);
+
+  const prevNameRef = useRef(locationName);
+  useEffect(() => {
+    if (map && !isAdjustingPin && prevNameRef.current !== locationName) {
+      prevNameRef.current = locationName;
+      map.panTo(center);
+    }
+  }, [map, center, locationName, isAdjustingPin]);
+
+  return null;
+};
 
 export const StepScheduleLocation: React.FC = () => {
   const {
@@ -62,10 +122,23 @@ export const StepScheduleLocation: React.FC = () => {
   const [localSlot, setLocalSlot] = useState(scheduledTimeSlot);
   const [localNotes, setLocalNotes] = useState(locationNotes);
 
-  const [mapLoaded, setMapLoaded] = useState(false);
+  const mapLoaded = useApiIsLoaded();
   const [mapError, setMapError] = useState<string | null>(null);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
   const [pinNotice, setPinNotice] = useState(false);
+
+  // Modo local de ajuste de pin
+  const [isAdjustingPin, setIsAdjustingPin] = useState(false);
+
+  // Hook de referencia al AdvancedMarker de @vis.gl
+  const [markerRef, marker] = useAdvancedMarkerRef();
+
+  // Asegurar sincronización imperativa de gmpDraggable en el AdvancedMarkerElement
+  useEffect(() => {
+    if (marker) {
+      marker.gmpDraggable = isAdjustingPin;
+    }
+  }, [marker, isAdjustingPin]);
 
   const coords = {
     lat: typeof currentLocation?.lat === "number" ? currentLocation.lat : DEFAULT_CENTER.lat,
@@ -105,23 +178,30 @@ export const StepScheduleLocation: React.FC = () => {
   };
 
   const handleMarkerDragEnd = (e: any) => {
-    if (!e.latLng) return;
-    const newLat = Number(e.latLng.lat().toFixed(6));
-    const newLng = Number(e.latLng.lng().toFixed(6));
-    handleUpdateCoords(newLat, newLng);
+    if (!isAdjustingPin) return;
+    const newCoords = extractCoords(e, marker);
+    if (newCoords) {
+      handleUpdateCoords(newCoords.lat, newCoords.lng);
+    }
   };
 
   const handleMapClick = (e: any) => {
-    if (!e.latLng) return;
-    const newLat = Number(e.latLng.lat().toFixed(6));
-    const newLng = Number(e.latLng.lng().toFixed(6));
-    handleUpdateCoords(newLat, newLng);
+    if (!isAdjustingPin) return;
+    const newCoords = extractCoords(e, marker);
+    if (newCoords) {
+      handleUpdateCoords(newCoords.lat, newCoords.lng);
+    }
   };
 
-  const handleAjustarPin = () => {
-    setRecenterTrigger((prev) => prev + 1);
-    setPinNotice(true);
-    setTimeout(() => setPinNotice(false), 2200);
+  const handleToggleAjustarPin = () => {
+    if (!isAdjustingPin) {
+      setIsAdjustingPin(true);
+      setRecenterTrigger((prev) => prev + 1);
+    } else {
+      setIsAdjustingPin(false);
+      setPinNotice(true);
+      setTimeout(() => setPinNotice(false), 2200);
+    }
   };
 
   const handleContinue = () => {
@@ -257,12 +337,8 @@ export const StepScheduleLocation: React.FC = () => {
               <p className="text-[10px] text-slate-400 mt-0.5">Verifica NEXT_PUBLIC_GOOGLE_MAPS_API_KEY en .env.local</p>
             </div>
           ) : (
-            <APIProvider
-              apiKey={apiKey}
-              onLoad={() => setMapLoaded(true)}
-              onError={(err) => setMapError(err instanceof Error ? err.message : "Error cargando Google Maps")}
-            >
               <Map
+                mapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID || "DEMO_MAP_ID"}
                 defaultCenter={coords}
                 defaultZoom={15}
                 gestureHandling="greedy"
@@ -275,15 +351,21 @@ export const StepScheduleLocation: React.FC = () => {
                 onClick={handleMapClick}
                 style={{ width: "100%", height: "100%" }}
               >
-                <MapPanController center={coords} recenterTrigger={recenterTrigger} />
-                <Marker
+                <MapPanController
+                  center={coords}
+                  recenterTrigger={recenterTrigger}
+                  locationName={currentLocation.name}
+                  isAdjustingPin={isAdjustingPin}
+                />
+                <AdvancedMarker
+                  ref={markerRef}
                   position={coords}
-                  draggable={true}
+                  draggable={isAdjustingPin}
+                  {...({ gmpDraggable: isAdjustingPin } as any)}
                   onDragEnd={handleMarkerDragEnd}
                   title="Punto de atención del servicio (arrastra para ajustar)"
                 />
               </Map>
-            </APIProvider>
           )}
 
           {/* Top Status Badge */}
@@ -296,9 +378,16 @@ export const StepScheduleLocation: React.FC = () => {
 
           {/* Top Right Instruction Tooltip */}
           <div className="absolute top-2.5 right-2.5 z-10 pointer-events-none">
-            <span className="bg-emerald-700/90 backdrop-blur-md text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md">
-              📍 Pin ajustable
-            </span>
+            {isAdjustingPin ? (
+              <span className="bg-amber-500 text-slate-950 text-[9px] font-bold px-2.5 py-0.5 rounded-full shadow-md flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-ping" />
+                Arrastra el pin o toca el mapa
+              </span>
+            ) : (
+              <span className="bg-emerald-700/90 backdrop-blur-md text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md">
+                📍 Pin ajustable
+              </span>
+            )}
           </div>
 
           {/* Error Banner */}
@@ -310,24 +399,38 @@ export const StepScheduleLocation: React.FC = () => {
             </div>
           )}
 
-          {/* Pin center notice badge when recentered */}
+          {/* Pin notice badge when saved */}
           {pinNotice && (
             <div className="absolute bottom-11 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-              <div className="bg-slate-900/95 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg border border-emerald-500/50 whitespace-nowrap">
-                🎯 Centrado en tu ubicación
+              <div className="bg-slate-900/95 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg border border-emerald-500/50 whitespace-nowrap flex items-center gap-1">
+                <Check className="w-3 h-3 text-emerald-400" />
+                <span>Posición guardada</span>
               </div>
             </div>
           )}
 
-          {/* GPS recenter / Ajustar Pin badge */}
+          {/* Botón Modo Ajustar Pin / Guardar posición */}
           <button
             type="button"
-            onClick={handleAjustarPin}
-            className="absolute bottom-2.5 right-2.5 z-10 bg-white/95 backdrop-blur-sm hover:bg-white text-slate-800 text-[10px] font-bold px-2.5 py-1 rounded-xl shadow-md border border-slate-200 flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
-            title="Centrar mapa en la ubicación del servicio y hacer zoom"
+            onClick={handleToggleAjustarPin}
+            className={`absolute bottom-2.5 right-2.5 z-10 text-[10px] font-bold px-2.5 py-1 rounded-xl shadow-md border flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer ${
+              isAdjustingPin
+                ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500 ring-2 ring-emerald-400/40"
+                : "bg-white/95 backdrop-blur-sm hover:bg-white text-slate-800 border-slate-200"
+            }`}
+            title={isAdjustingPin ? "Guardar la nueva posición" : "Ajustar pin en el mapa"}
           >
-            <Navigation className="w-3 h-3 text-emerald-600" />
-            <span>Ajustar Pin</span>
+            {isAdjustingPin ? (
+              <>
+                <Check className="w-3 h-3 text-white" />
+                <span>Guardar posición</span>
+              </>
+            ) : (
+              <>
+                <Navigation className="w-3 h-3 text-emerald-600" />
+                <span>Ajustar Pin</span>
+              </>
+            )}
           </button>
         </div>
 

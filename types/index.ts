@@ -56,7 +56,7 @@ export interface Technician {
   bio: string;
 }
 
-export type MediaFileType = "image" | "video" | "audio";
+export type MediaFileType = "image" | "video";
 
 export interface AiDiagnosisPreset {
   id: string;
@@ -76,6 +76,27 @@ export interface AiDiagnosisPreset {
   priceFixed?: number;
   priceRangeMin?: number;
   priceRangeMax?: number;
+  method: "Caso_Predefinido";
+}
+
+export type DiagnosisMethod = "Análisis_IA" | "Caso_Predefinido";
+
+export type DiagnosisStatus = "idle" | "loading" | "success" | "error";
+
+export interface AiDiagnosisResult {
+  title: string;
+  confidenceScore: number;
+  confidenceLevel: "high" | "medium" | "low";
+  pricingType: "guaranteed_fixed" | "estimated_range";
+  severity: "baja" | "media" | "alta" | "critica";
+  rootCause: string;
+  suggestedFix: string;
+  requiredMaterials: string[];
+  estimatedHours: number;
+  priceFixed?: number;
+  priceRangeMin?: number;
+  priceRangeMax?: number;
+  method: "Análisis_IA";
 }
 
 export type OrderStatus =
@@ -123,7 +144,7 @@ export interface ActiveOrder {
   scheduledTimeSlot?: string;
   location: ServiceLocation;
   notes?: string;
-  diagnosis: AiDiagnosisPreset;
+  diagnosis: AiDiagnosisPreset | AiDiagnosisResult;
   technician: Technician;
   otpCode: string; // Código de 4 dígitos entregado por el cliente al técnico
   isOtpValidated: boolean;
