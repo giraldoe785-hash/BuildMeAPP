@@ -111,6 +111,60 @@ enum CanceladoPor {
   @@map("cancelado_por")
 }
 
+enum EstadoTicket {
+  ABIERTO           @map("abierto")
+  EN_GESTION        @map("en_gestion")
+  EN_ESPERA_USUARIO @map("en_espera_usuario")
+  RESUELTO          @map("resuelto")
+  CERRADO           @map("cerrado")
+
+  @@map("estado_ticket")
+}
+
+enum PrioridadTicket {
+  BAJA    @map("baja")
+  MEDIA   @map("media")
+  ALTA    @map("alta")
+  CRITICA @map("critica")
+
+  @@map("prioridad_ticket")
+}
+
+enum CategoriaTicket {
+  INCOMPARECENCIA         @map("incomparecencia")
+  DISPUTA_COSTO           @map("disputa_costo")
+  COMPORTAMIENTO_INDEBIDO @map("comportamiento_indebido")
+  FALLA_TECNICA_APP       @map("falla_tecnica_app")
+  GARANTIA_INCONFORME     @map("garantia_inconforme")
+  OTRO                    @map("otro")
+
+  @@map("categoria_ticket")
+}
+
+enum EstadoReclamacionGarantia {
+  EN_REVISION        @map("en_revision")
+  VISITA_APROBADA    @map("visita_aprobada")
+  REEMBOLSO_APROBADO @map("reembolso_aprobado")
+  RECHAZADA          @map("rechazada")
+
+  @@map("estado_reclamacion_garantia")
+}
+
+enum DestinoReembolso {
+  TARJETA_ORIGEN @map("tarjeta_origen")
+  FIXI_WALLET    @map("fixi_wallet")
+
+  @@map("destino_reembolso")
+}
+
+enum EstadoReembolso {
+  SOLICITADO @map("solicitado")
+  PROCESADO  @map("procesado")
+  FALLIDO    @map("fallido")
+
+  @@map("estado_reembolso")
+}
+
 // ============================================================
 // 1. USUARIOS
 // ============================================================
@@ -147,6 +201,13 @@ model Usuario {
   garantiasComoReparador GarantiaFixiCare[] @relation("GarantiaReparador")
 
   ordenesIntervenidasAdmin OrdenServicio[] @relation("AdminIntervencion")
+
+  ticketsEmitidos              TicketSoporte[]        @relation("TicketEmisor")
+  ticketsAsignados             TicketSoporte[]        @relation("TicketAgente")
+  mensajesSoporte              MensajeSoporte[]
+  trazabilidadesOrden          OrdenTrazabilidad[]    @relation("TrazabilidadUsuario")
+  reembolsosAutorizados        ReembolsoTransaccion[] @relation("ReembolsoAutorizador")
+  reembolsosSegundoAutorizador ReembolsoTransaccion[] @relation("ReembolsoSegundoAutorizador")
 
   @@map("usuarios")
 }
@@ -383,8 +444,12 @@ model OrdenServicio {
   calificacion        CalificacionServicio?
   mensajes            MensajeChat[]
   transaccionesWallet TransaccionWallet[]
+  adminIntervencion   Usuario?              @relation("AdminIntervencion", fields: [adminIntervencionId], references: [id])
 
-  adminIntervencion Usuario? @relation("AdminIntervencion", fields: [adminIntervencionId], references: [id])
+  trazabilidad          OrdenTrazabilidad[]
+  ticketsSoporte        TicketSoporte[]
+  reembolsos            ReembolsoTransaccion[]
+  reclamacionesGarantia ReclamacionGarantia[]  @relation("OrdenGarantia")
 
   @@index([clienteId])
   @@index([reparadorId])
@@ -441,6 +506,8 @@ model GarantiaFixiCare {
   orden     OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
   cliente   Usuario       @relation("GarantiaCliente", fields: [clienteId], references: [id])
   reparador Usuario       @relation("GarantiaReparador", fields: [reparadorId], references: [id])
+
+  reclamaciones ReclamacionGarantia[]
 
   @@index([clienteId])
   @@index([reparadorId])
@@ -536,4 +603,158 @@ model TransaccionWallet {
   @@index([walletId])
   @@index([ordenId])
   @@map("transacciones_wallet")
+}
+
+// ============================================================
+// 16. TRAZABILIDAD ORDEN
+// ============================================================
+
+model OrdenTrazabilidad {
+  id      String @id @default(uuid()) @db.Uuid
+  ordenId String @db.Uuid
+
+  estadoAnterior EstadoOrden?
+  estadoNuevo    EstadoOrden
+
+  cambiadoPorUsuarioId String     @db.Uuid
+  rolOperador          RolUsuario
+
+  motivoCambio String?  @db.VarChar(255)
+  creadoEn     DateTime @default(now())
+
+  orden              OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  cambiadoPorUsuario Usuario       @relation("TrazabilidadUsuario", fields: [cambiadoPorUsuarioId], references: [id])
+
+  @@index([ordenId])
+  @@index([cambiadoPorUsuarioId])
+  @@map("orden_trazabilidad")
+}
+
+// ============================================================
+// 17. SOPORTE Y DISPUTAS
+// ============================================================
+
+model TicketSoporte {
+  id String @id @default(uuid()) @db.Uuid
+
+  numeroTicket String @unique @db.VarChar(30)
+
+  usuarioEmisorId  String  @db.Uuid
+  agenteAsignadoId String? @db.Uuid
+  ordenId          String? @db.Uuid
+
+  categoria CategoriaTicket
+  prioridad PrioridadTicket @default(MEDIA)
+  estado    EstadoTicket    @default(ABIERTO)
+
+  asunto             String  @db.VarChar(150)
+  descripcion        String
+  resolucionDictamen String?
+
+  fechaLimiteSla DateTime
+  creadoEn       DateTime  @default(now())
+  actualizadoEn  DateTime  @updatedAt
+  cerradoEn      DateTime?
+
+  usuarioEmisor  Usuario        @relation("TicketEmisor", fields: [usuarioEmisorId], references: [id])
+  agenteAsignado Usuario?       @relation("TicketAgente", fields: [agenteAsignadoId], references: [id])
+  orden          OrdenServicio? @relation(fields: [ordenId], references: [id])
+
+  mensajes            MensajeSoporte[]
+  reclamacionGarantia ReclamacionGarantia?
+  reembolsos          ReembolsoTransaccion[]
+
+  @@index([usuarioEmisorId])
+  @@index([agenteAsignadoId])
+  @@index([ordenId])
+  @@index([estado])
+  @@index([prioridad])
+  @@map("tickets_soporte")
+}
+
+model MensajeSoporte {
+  id String @id @default(uuid()) @db.Uuid
+
+  ticketId String @db.Uuid
+  emisorId String @db.Uuid
+
+  mensaje           String
+  archivoAdjuntoUrl String?
+  esNotaInterna     Boolean @default(false)
+  leido             Boolean @default(false)
+
+  creadoEn DateTime @default(now())
+
+  ticket TicketSoporte @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  emisor Usuario       @relation(fields: [emisorId], references: [id])
+
+  @@index([ticketId])
+  @@index([emisorId])
+  @@map("mensajes_soporte")
+}
+
+model ReclamacionGarantia {
+  id String @id @default(uuid()) @db.Uuid
+
+  garantiaId String @db.Uuid
+  ticketId   String @unique @db.Uuid
+
+  descripcionFalla       String
+  evidenciaMultimediaUrl String
+
+  estado EstadoReclamacionGarantia @default(EN_REVISION)
+
+  ordenGarantiaId  String? @db.Uuid
+  dictamenPericial String?
+
+  creadoEn   DateTime  @default(now())
+  resueltoEn DateTime?
+
+  garantia      GarantiaFixiCare @relation(fields: [garantiaId], references: [id])
+  ticket        TicketSoporte    @relation(fields: [ticketId], references: [id])
+  ordenGarantia OrdenServicio?   @relation("OrdenGarantia", fields: [ordenGarantiaId], references: [id])
+
+  @@index([garantiaId])
+  @@index([ordenGarantiaId])
+  @@map("reclamaciones_garantia")
+}
+
+// ============================================================
+// 18. REEMBOLSOS
+// ============================================================
+
+model ReembolsoTransaccion {
+  id                String @id @default(uuid()) @db.Uuid
+  numeroComprobante String @unique @db.VarChar(50)
+
+  ordenId  String  @db.Uuid
+  ticketId String? @db.Uuid
+
+  autorizadoPorUsuarioId String  @db.Uuid
+  segundoAutorizadorId   String? @db.Uuid
+
+  destino DestinoReembolso
+  estado  EstadoReembolso  @default(SOLICITADO)
+
+  monto            Decimal @db.Decimal(10, 2)
+  motivo           String
+  pasarelaRefundId String? @db.VarChar(100)
+  errorDetalle     String? @db.VarChar(255)
+
+  creadoEn                 DateTime  @default(now())
+  fechaAutorizacion        DateTime?
+  fechaSegundaAutorizacion DateTime?
+  procesadoEn              DateTime?
+
+  orden              OrdenServicio  @relation(fields: [ordenId], references: [id])
+  ticket             TicketSoporte? @relation(fields: [ticketId], references: [id])
+  autorizadoPor      Usuario        @relation("ReembolsoAutorizador", fields: [autorizadoPorUsuarioId], references: [id])
+  segundoAutorizador Usuario?       @relation("ReembolsoSegundoAutorizador", fields: [segundoAutorizadorId], references: [id])
+
+  @@index([ordenId])
+  @@index([ticketId])
+  @@index([estado])
+  @@index([autorizadoPorUsuarioId])
+  @@index([segundoAutorizadorId])
+  @@map("reembolsos_transacciones")
 }
