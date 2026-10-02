@@ -1,0 +1,539 @@
+// ============================================================
+// BuildMeAPP - Prisma 7 / PostgreSQL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum RolUsuario {
+  CLIENTE
+  REPARADOR
+  ADMINISTRADOR
+
+  @@map("rol_usuario")
+}
+
+enum EstadoCuenta {
+  PENDIENTE_VERIFICACION
+  EN_REVISION
+  VERIFICADO
+  RECHAZADO
+  SUSPENDIDO
+
+  @@map("estado_cuenta")
+}
+
+enum EstadoOrden {
+  BUSCANDO
+  EN_CAMINO
+  EN_SITIO
+  EN_TRABAJO
+  FINALIZADO
+  CANCELADO
+
+  @@map("estado_orden")
+}
+
+enum ModalidadServicio {
+  INMEDIATA
+  PROGRAMADA
+
+  @@map("modalidad_servicio")
+}
+
+enum MetodoDiagnostico {
+  ANALISIS_IA
+  CASO_PREDEFINIDO
+
+  @@map("metodo_diagnostico")
+}
+
+enum EstadoCostoAdicional {
+  PENDIENTE
+  APROBADO
+  RECHAZADO
+
+  @@map("estado_costo_adicional")
+}
+
+enum MetodoPago {
+  TARJETA
+  FIXI_WALLET
+
+  @@map("metodo_pago")
+}
+
+enum EstadoPago {
+  PENDIENTE
+  PREAUTORIZADO
+  CAPTURADO
+  LIBERADO
+  REEMBOLSADO
+  FALLIDO
+
+  @@map("estado_pago")
+}
+
+enum TipoMovimientoWallet {
+  RECARGA
+  PAGO_SERVICIO
+  REEMBOLSO_GARANTIA
+  TRANSFERENCIA_PROPINA
+
+  @@map("tipo_movimiento_wallet")
+}
+
+enum EstadoGarantia {
+  VIGENTE
+  EN_RECLAMACION
+  VENCIDA
+  ANULADA
+
+  @@map("estado_garantia")
+}
+
+enum CanceladoPor {
+  CLIENTE
+  REPARADOR
+  SISTEMA
+  SOPORTE
+
+  @@map("cancelado_por")
+}
+
+// ============================================================
+// 1. USUARIOS
+// ============================================================
+
+model Usuario {
+  id           String       @id @default(uuid()) @db.Uuid
+  email        String       @unique @db.VarChar(150)
+  telefono     String?      @unique @db.VarChar(30)
+  passwordHash String       @db.VarChar(255)
+  rol          RolUsuario   @default(CLIENTE)
+  estado       EstadoCuenta @default(PENDIENTE_VERIFICACION)
+
+  codigoVerificacion    String?   @db.VarChar(10)
+  intentosFallidosLogin Int       @default(0)
+  bloqueadoHasta        DateTime?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  perfilCliente   PerfilCliente?
+  perfilReparador PerfilReparador?
+
+  direcciones          DireccionCliente[]
+  ordenesComoCliente   OrdenServicio[]    @relation("OrdenCliente")
+  ordenesComoReparador OrdenServicio[]    @relation("OrdenReparador")
+
+  mensajesChat MensajeChat[]
+  wallet       FixiWallet?
+
+  calificacionesCliente   CalificacionServicio[] @relation("CalificacionCliente")
+  calificacionesRecibidas CalificacionServicio[] @relation("CalificacionReparador")
+
+  garantiasComoCliente   GarantiaFixiCare[] @relation("GarantiaCliente")
+  garantiasComoReparador GarantiaFixiCare[] @relation("GarantiaReparador")
+
+  ordenesIntervenidasAdmin OrdenServicio[] @relation("AdminIntervencion")
+
+  @@map("usuarios")
+}
+
+// ============================================================
+// 2. PERFIL DEL CLIENTE
+// ============================================================
+
+model PerfilCliente {
+  id        String   @id @default(uuid()) @db.Uuid
+  usuarioId String   @unique @db.Uuid
+  nombres   String   @db.VarChar(100)
+  apellidos String   @db.VarChar(100)
+  creadoEn  DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@map("perfiles_clientes")
+}
+
+// ============================================================
+// 3. DIRECCIONES DEL CLIENTE
+// ============================================================
+
+model DireccionCliente {
+  id               String   @id @default(uuid()) @db.Uuid
+  clienteId        String   @db.Uuid
+  alias            String   @db.VarChar(50)
+  direccionTexto   String   @db.VarChar(255)
+  latitud          Decimal? @db.Decimal(10, 7)
+  longitud         Decimal? @db.Decimal(10, 7)
+  notasAcceso      String?
+  esPredeterminada Boolean  @default(false)
+  creadoEn         DateTime @default(now())
+
+  cliente Usuario @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@index([clienteId])
+  @@map("direcciones_clientes")
+}
+
+// ============================================================
+// 4. PERFIL DEL REPARADOR
+// ============================================================
+
+model PerfilReparador {
+  id        String @id @default(uuid()) @db.Uuid
+  usuarioId String @unique @db.Uuid
+
+  tipoDocumento   String @db.VarChar(30)
+  numeroDocumento String @unique @db.VarChar(50)
+
+  nombres   String @db.VarChar(100)
+  apellidos String @db.VarChar(100)
+
+  direccion       String?
+  ciudadCobertura String  @db.VarChar(100)
+
+  enLinea Boolean @default(false)
+
+  latitudActual         Decimal?  @db.Decimal(10, 7)
+  longitudActual        Decimal?  @db.Decimal(10, 7)
+  fechaUltimaTelemetria DateTime?
+
+  calificacionPromedio     Decimal @default(0) @db.Decimal(3, 2)
+  totalTrabajosCompletados Int     @default(0)
+
+  creadoEn DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  documentos     DocumentoReparador[]    @relation("PerfilDocumentos")
+  especialidades ReparadorEspecialidad[]
+
+  @@index([enLinea, ciudadCobertura])
+  @@map("perfiles_reparadores")
+}
+
+// ============================================================
+// 5. DOCUMENTOS DEL REPARADOR
+// ============================================================
+
+model DocumentoReparador {
+  id                 String    @id @default(uuid()) @db.Uuid
+  reparadorId        String    @db.Uuid
+  tipoDocumento      String    @db.VarChar(50)
+  archivoUrl         String    @db.Text
+  estado             String    @default("pendiente") @db.VarChar(30)
+  fechaExpiracion    DateTime?
+  observacionesAdmin String?
+  creadoEn           DateTime  @default(now())
+
+  reparador PerfilReparador @relation("PerfilDocumentos", fields: [reparadorId], references: [id], onDelete: Cascade)
+
+  @@index([reparadorId])
+  @@map("documentos_reparadores")
+}
+
+// ============================================================
+// 6. CATEGORÍAS DE SERVICIO
+// ============================================================
+
+model CategoriaServicio {
+  id          String  @id @default(uuid()) @db.Uuid
+  nombre      String  @unique @db.VarChar(100)
+  slug        String  @unique @db.VarChar(100)
+  descripcion String?
+  iconoUrl    String?
+  activo      Boolean @default(true)
+
+  especialidades ReparadorEspecialidad[]
+  ordenes        OrdenServicio[]
+
+  @@map("categorias_servicio")
+}
+
+// ============================================================
+// 7. ESPECIALIDADES DEL REPARADOR
+// ============================================================
+
+model ReparadorEspecialidad {
+  reparadorId  String   @db.Uuid
+  categoriaId  String   @db.Uuid
+  acreditadoEn DateTime @default(now())
+
+  reparador PerfilReparador   @relation(fields: [reparadorId], references: [id], onDelete: Cascade)
+  categoria CategoriaServicio @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@id([reparadorId, categoriaId])
+  @@map("reparador_especialidades")
+}
+
+// ============================================================
+// 8. CUPONES
+// ============================================================
+
+model Cupon {
+  id                  String    @id @default(uuid()) @db.Uuid
+  codigo              String    @unique @db.VarChar(50)
+  descuentoPorcentaje Decimal?  @db.Decimal(5, 2)
+  descuentoMontoFijo  Decimal?  @db.Decimal(10, 2)
+  fechaVencimiento    DateTime?
+  limiteUsos          Int?
+  usosActuales        Int       @default(0)
+  activo              Boolean   @default(true)
+
+  ordenes OrdenServicio[]
+
+  @@map("cupones")
+}
+
+// ============================================================
+// 9. ORDENES DE SERVICIO
+// ============================================================
+
+model OrdenServicio {
+  id String @id @default(uuid()) @db.Uuid
+
+  numeroOrden String @unique @db.VarChar(50)
+
+  clienteId   String  @db.Uuid
+  reparadorId String? @db.Uuid
+  categoriaId String  @db.Uuid
+
+  direccionServicio String   @db.VarChar(255)
+  latitud           Decimal? @db.Decimal(10, 7)
+  longitud          Decimal? @db.Decimal(10, 7)
+  notasAcceso       String?
+
+  modalidad       ModalidadServicio
+  fechaProgramada DateTime?
+  franjaHoraria   String?           @db.VarChar(50)
+
+  metodoDiagnostico    MetodoDiagnostico
+  diagnosticoCausaRaiz String?
+  solucionPropuesta    String?
+  archivoMultimediaUrl String?
+
+  codigoOtp           String?   @db.VarChar(4)
+  otpValidado         Boolean   @default(false)
+  intentosFallidosOtp Int       @default(0)
+  otpBloqueadoHasta   DateTime?
+
+  fotoEstadoInicialUrl String?
+  fotoEntregaFinalUrl  String?
+
+  codigoOtpCierre        String?   @db.VarChar(4)
+  otpCierreValidado      Boolean   @default(false)
+  fechaLimiteConformidad DateTime?
+
+  costoVisita           Decimal @default(0) @db.Decimal(10, 2)
+  costoManoObraEstimado Decimal @db.Decimal(10, 2)
+  costoGarantiaFixicare Decimal @default(0) @db.Decimal(10, 2)
+  montoDescuento        Decimal @default(0) @db.Decimal(10, 2)
+
+  cuponId String? @db.Uuid
+
+  totalPreautorizado Decimal  @db.Decimal(10, 2)
+  totalCobradoFinal  Decimal? @db.Decimal(10, 2)
+  propina            Decimal  @default(0) @db.Decimal(10, 2)
+
+  metodoPago MetodoPago
+  estadoPago EstadoPago @default(PENDIENTE)
+
+  pasarelaHoldId    String? @db.VarChar(100)
+  pasarelaCaptureId String? @db.VarChar(100)
+
+  estado EstadoOrden @default(BUSCANDO)
+
+  canceladoPor        CanceladoPor?
+  motivoCancelacion   String?
+  penalidadAplicada   Decimal       @default(0) @db.Decimal(10, 2)
+  compensacionTecnico Decimal       @default(0) @db.Decimal(10, 2)
+
+  esIntervencionAdmin     Boolean @default(false)
+  adminIntervencionId     String? @db.Uuid
+  justificacionDesbloqueo String?
+
+  fechaCreacion      DateTime  @default(now())
+  fechaAsignacion    DateTime?
+  fechaInicioViaje   DateTime?
+  fechaArriboSitio   DateTime?
+  fechaInicioTrabajo DateTime?
+  fechaFinalizacion  DateTime?
+  fechaCancelacion   DateTime?
+
+  cliente   Usuario           @relation("OrdenCliente", fields: [clienteId], references: [id])
+  reparador Usuario?          @relation("OrdenReparador", fields: [reparadorId], references: [id])
+  categoria CategoriaServicio @relation(fields: [categoriaId], references: [id])
+  cupon     Cupon?            @relation(fields: [cuponId], references: [id])
+
+  costosAdicionales   CostoAdicional[]
+  garantia            GarantiaFixiCare?
+  calificacion        CalificacionServicio?
+  mensajes            MensajeChat[]
+  transaccionesWallet TransaccionWallet[]
+
+  adminIntervencion Usuario? @relation("AdminIntervencion", fields: [adminIntervencionId], references: [id])
+
+  @@index([clienteId])
+  @@index([reparadorId])
+  @@index([categoriaId])
+  @@index([estado, fechaProgramada])
+  @@map("ordenes_servicio")
+}
+
+// ============================================================
+// 10. COSTOS ADICIONALES
+// ============================================================
+
+model CostoAdicional {
+  id      String @id @default(uuid()) @db.Uuid
+  ordenId String @db.Uuid
+
+  descripcion      String
+  monto            Decimal @db.Decimal(10, 2)
+  fotoEvidenciaUrl String
+
+  estado EstadoCostoAdicional @default(PENDIENTE)
+
+  pasarelaHoldIncrementalId String? @db.VarChar(100)
+
+  fechaSolicitud DateTime  @default(now())
+  fechaRespuesta DateTime?
+
+  orden OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+
+  @@index([ordenId])
+  @@map("costos_adicionales")
+}
+
+// ============================================================
+// 11. GARANTÍA FIXICARE
+// ============================================================
+
+model GarantiaFixiCare {
+  id           String @id @default(uuid()) @db.Uuid
+  codigoPoliza String @unique @db.VarChar(50)
+
+  ordenId     String @unique @db.Uuid
+  clienteId   String @db.Uuid
+  reparadorId String @db.Uuid
+
+  fechaEmision     DateTime
+  fechaVencimiento DateTime
+  estado           EstadoGarantia @default(VIGENTE)
+
+  certificadoPdfUrl String?
+
+  creadoEn DateTime @default(now())
+
+  orden     OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  cliente   Usuario       @relation("GarantiaCliente", fields: [clienteId], references: [id])
+  reparador Usuario       @relation("GarantiaReparador", fields: [reparadorId], references: [id])
+
+  @@index([clienteId])
+  @@index([reparadorId])
+  @@map("garantias_fixicare")
+}
+
+// ============================================================
+// 12. CALIFICACIONES
+// ============================================================
+
+model CalificacionServicio {
+  id String @id @default(uuid()) @db.Uuid
+
+  ordenId     String @unique @db.Uuid
+  clienteId   String @db.Uuid
+  reparadorId String @db.Uuid
+
+  puntuacion Int
+  comentario String?
+
+  creadoEn DateTime @default(now())
+
+  orden     OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  cliente   Usuario       @relation("CalificacionCliente", fields: [clienteId], references: [id])
+  reparador Usuario       @relation("CalificacionReparador", fields: [reparadorId], references: [id])
+
+  @@index([clienteId])
+  @@index([reparadorId])
+  @@map("calificaciones_servicio")
+}
+
+// ============================================================
+// 13. MENSAJES DEL CHAT
+// ============================================================
+
+model MensajeChat {
+  id       String @id @default(uuid()) @db.Uuid
+  ordenId  String @db.Uuid
+  emisorId String @db.Uuid
+
+  contenido         String  @db.VarChar(500)
+  esRespuestaRapida Boolean @default(false)
+  leido             Boolean @default(false)
+
+  creadoEn DateTime @default(now())
+
+  orden  OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  emisor Usuario       @relation(fields: [emisorId], references: [id])
+
+  @@index([ordenId])
+  @@index([emisorId])
+  @@map("mensajes_chat")
+}
+
+// ============================================================
+// 14. FIXI WALLET
+// ============================================================
+
+model FixiWallet {
+  id        String @id @default(uuid()) @db.Uuid
+  usuarioId String @unique @db.Uuid
+
+  saldoDisponible Decimal @default(0) @db.Decimal(12, 2)
+  saldoRetenido   Decimal @default(0) @db.Decimal(12, 2)
+
+  actualizadoEn DateTime @updatedAt
+
+  usuario       Usuario             @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  transacciones TransaccionWallet[]
+
+  @@map("fixi_wallets")
+}
+
+// ============================================================
+// 15. TRANSACCIONES WALLET
+// ============================================================
+
+model TransaccionWallet {
+  id       String  @id @default(uuid()) @db.Uuid
+  walletId String  @db.Uuid
+  ordenId  String? @db.Uuid
+
+  tipo              TipoMovimientoWallet
+  monto             Decimal              @db.Decimal(10, 2)
+  referenciaExterna String?              @db.VarChar(100)
+  descripcion       String
+
+  creadoEn DateTime @default(now())
+
+  wallet FixiWallet     @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  orden  OrdenServicio? @relation(fields: [ordenId], references: [id])
+
+  @@index([walletId])
+  @@index([ordenId])
+  @@map("transacciones_wallet")
+}

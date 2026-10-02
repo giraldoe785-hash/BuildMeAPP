@@ -8,3 +8,9 @@ out/
 .env.production.local
 
 tsconfig.tsbuildinfo
+
+/generated/prisma
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
