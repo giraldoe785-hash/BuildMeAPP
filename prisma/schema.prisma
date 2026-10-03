@@ -208,6 +208,7 @@ model Usuario {
   trazabilidadesOrden          OrdenTrazabilidad[]    @relation("TrazabilidadUsuario")
   reembolsosAutorizados        ReembolsoTransaccion[] @relation("ReembolsoAutorizador")
   reembolsosSegundoAutorizador ReembolsoTransaccion[] @relation("ReembolsoSegundoAutorizador")
+  sesionUsuarios               SesionUsuario[]
 
   @@map("usuarios")
 }
@@ -757,4 +758,30 @@ model ReembolsoTransaccion {
   @@index([autorizadoPorUsuarioId])
   @@index([segundoAutorizadorId])
   @@map("reembolsos_transacciones")
+}
+
+// ============================================================
+// 19. SESIONES DE USUARIO
+// ============================================================
+
+model SesionUsuario {
+  id        String @id @default(uuid()) @db.Uuid
+  usuarioId String @db.Uuid
+
+  tokenHash String  @unique @db.VarChar(128)
+  revocado  Boolean @default(false)
+
+  ipDireccion String? @db.VarChar(45)
+  userAgent   String? @db.Text
+  dispositivo String? @db.VarChar(100)
+
+  fechaExpira DateTime
+  creadoEn    DateTime  @default(now())
+  ultimoUsoEn DateTime?
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, revocado])
+  @@index([fechaExpira])
+  @@map("sesiones_usuario")
 }
