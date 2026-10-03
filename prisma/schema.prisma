@@ -171,7 +171,7 @@ enum EstadoReembolso {
 
 model Usuario {
   id           String       @id @default(uuid()) @db.Uuid
-  email        String       @unique @db.VarChar(150)
+  email        String?      @unique @db.VarChar(150)
   telefono     String?      @unique @db.VarChar(30)
   passwordHash String       @db.VarChar(255)
   rol          RolUsuario   @default(CLIENTE)
