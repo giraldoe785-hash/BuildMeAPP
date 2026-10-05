@@ -1,5 +1,14 @@
 // ============================================================
 // BuildMeAPP - Prisma 7 / PostgreSQL
+//
+// Cambios respecto a la versión anterior (marcados con [MEJORA]):
+//  1. Se CONSERVA el diagnóstico con IA (Gemini). Se agrega el catálogo
+//     TipoFalla para los "casos predefinidos" (con rango de precios) y como
+//     respaldo si la IA falla o se agota la cuota gratuita.
+//  2. DocumentoReparador.estado pasa de texto libre a enum EstadoDocumento.
+//  3. Usuario.codigoVerificacionExpiraEn: el código de verificación caduca.
+//  4. Índices compuestos para las consultas más frecuentes y para las
+//     llaves foráneas que no tenían índice.
 // ============================================================
 
 generator client {
@@ -56,6 +65,16 @@ enum MetodoDiagnostico {
   CASO_PREDEFINIDO
 
   @@map("metodo_diagnostico")
+}
+
+// [MEJORA] Reemplaza el texto libre "pendiente" de DocumentoReparador.estado
+enum EstadoDocumento {
+  PENDIENTE @map("pendiente")
+  APROBADO  @map("aprobado")
+  RECHAZADO @map("rechazado")
+  VENCIDO   @map("vencido")
+
+  @@map("estado_documento")
 }
 
 enum EstadoCostoAdicional {
@@ -170,16 +189,18 @@ enum EstadoReembolso {
 // ============================================================
 
 model Usuario {
-  id           String       @id @default(uuid()) @db.Uuid
-  email        String?      @unique @db.VarChar(150)
-  telefono     String?      @unique @db.VarChar(30)
-  passwordHash String       @db.VarChar(255)
-  rol          RolUsuario   @default(CLIENTE)
-  estado       EstadoCuenta @default(PENDIENTE_VERIFICACION)
+  id            String       @id @default(uuid()) @db.Uuid
+  email         String?      @unique @db.VarChar(150)
+  nombreUsuario String       @unique @db.VarChar(50)
+  telefono      String?      @unique @db.VarChar(30)
+  passwordHash  String       @db.VarChar(255)
+  rol           RolUsuario   @default(CLIENTE)
+  estado        EstadoCuenta @default(PENDIENTE_VERIFICACION)
 
-  codigoVerificacion    String?   @db.VarChar(10)
-  intentosFallidosLogin Int       @default(0)
-  bloqueadoHasta        DateTime?
+  codigoVerificacion         String?   @db.VarChar(10)
+  codigoVerificacionExpiraEn DateTime? // [MEJORA] el código debe caducar
+  intentosFallidosLogin      Int       @default(0)
+  bloqueadoHasta             DateTime?
 
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
@@ -273,6 +294,8 @@ model PerfilReparador {
   longitudActual        Decimal?  @db.Decimal(10, 7)
   fechaUltimaTelemetria DateTime?
 
+  // Valores derivados (denormalizados): actualízalos en la MISMA transacción
+  // que registra una calificación o cierra un trabajo, para que no se desfasen.
   calificacionPromedio     Decimal @default(0) @db.Decimal(3, 2)
   totalTrabajosCompletados Int     @default(0)
 
@@ -292,14 +315,14 @@ model PerfilReparador {
 // ============================================================
 
 model DocumentoReparador {
-  id                 String    @id @default(uuid()) @db.Uuid
-  reparadorId        String    @db.Uuid
-  tipoDocumento      String    @db.VarChar(50)
-  archivoUrl         String    @db.Text
-  estado             String    @default("pendiente") @db.VarChar(30)
+  id                 String          @id @default(uuid()) @db.Uuid
+  reparadorId        String          @db.Uuid
+  tipoDocumento      String          @db.VarChar(50)
+  archivoUrl         String          @db.Text
+  estado             EstadoDocumento @default(PENDIENTE) // [MEJORA] antes era String libre
   fechaExpiracion    DateTime?
   observacionesAdmin String?
-  creadoEn           DateTime  @default(now())
+  creadoEn           DateTime        @default(now())
 
   reparador PerfilReparador @relation("PerfilDocumentos", fields: [reparadorId], references: [id], onDelete: Cascade)
 
@@ -321,8 +344,39 @@ model CategoriaServicio {
 
   especialidades ReparadorEspecialidad[]
   ordenes        OrdenServicio[]
+  tiposFalla     TipoFalla[]
 
   @@map("categorias_servicio")
+}
+
+// ============================================================
+// 6B. TIPOS DE FALLA (catálogo de CASOS PREDEFINIDOS)
+// [MEJORA] Cada categoría tiene una lista de fallas comunes con su causa
+// probable, solución típica y rango de precio estimado. Alimenta la opción
+// "elegir un caso predefinido" (HU-05) y sirve de respaldo si Gemini falla
+// o se alcanza el límite de la cuota gratuita. Es opcional: puedes no usarla.
+// ============================================================
+
+model TipoFalla {
+  id          String @id @default(uuid()) @db.Uuid
+  categoriaId String @db.Uuid
+
+  nombre         String  @db.VarChar(120)
+  descripcion    String?
+  causaProbable  String?
+  solucionTipica String?
+
+  precioMinimo Decimal @db.Decimal(10, 2)
+  precioMaximo Decimal @db.Decimal(10, 2)
+
+  activo Boolean @default(true)
+
+  categoria CategoriaServicio @relation(fields: [categoriaId], references: [id])
+  ordenes   OrdenServicio[]
+
+  @@unique([categoriaId, nombre])
+  @@index([categoriaId, activo])
+  @@map("tipos_falla")
 }
 
 // ============================================================
@@ -382,7 +436,11 @@ model OrdenServicio {
   fechaProgramada DateTime?
   franjaHoraria   String?           @db.VarChar(50)
 
+  // Diagnóstico: por IA (Gemini) o por caso predefinido.
+  // [MEJORA] tipoFallaId (opcional) enlaza al catálogo cuando el método es
+  // CASO_PREDEFINIDO; vale null cuando el diagnóstico lo generó la IA.
   metodoDiagnostico    MetodoDiagnostico
+  tipoFallaId          String?           @db.Uuid
   diagnosticoCausaRaiz String?
   solucionPropuesta    String?
   archivoMultimediaUrl String?
@@ -438,6 +496,7 @@ model OrdenServicio {
   cliente   Usuario           @relation("OrdenCliente", fields: [clienteId], references: [id])
   reparador Usuario?          @relation("OrdenReparador", fields: [reparadorId], references: [id])
   categoria CategoriaServicio @relation(fields: [categoriaId], references: [id])
+  tipoFalla TipoFalla?        @relation(fields: [tipoFallaId], references: [id])
   cupon     Cupon?            @relation(fields: [cuponId], references: [id])
 
   costosAdicionales   CostoAdicional[]
@@ -456,6 +515,10 @@ model OrdenServicio {
   @@index([reparadorId])
   @@index([categoriaId])
   @@index([estado, fechaProgramada])
+  @@index([estado, categoriaId]) // [MEJORA] "solicitudes BUSCANDO de mi especialidad" (HU-19)
+  @@index([tipoFallaId])
+  @@index([cuponId])
+  @@index([adminIntervencionId])
   @@map("ordenes_servicio")
 }
 
@@ -512,6 +575,7 @@ model GarantiaFixiCare {
 
   @@index([clienteId])
   @@index([reparadorId])
+  @@index([estado, fechaVencimiento]) // [MEJORA] para marcar garantías vencidas
   @@map("garantias_fixicare")
 }
 
@@ -526,7 +590,7 @@ model CalificacionServicio {
   clienteId   String @db.Uuid
   reparadorId String @db.Uuid
 
-  puntuacion Int
+  puntuacion Int // 1 a 5 (se refuerza con un CHECK, ver checks.sql)
   comentario String?
 
   creadoEn DateTime @default(now())
@@ -558,7 +622,7 @@ model MensajeChat {
   orden  OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
   emisor Usuario       @relation(fields: [emisorId], references: [id])
 
-  @@index([ordenId])
+  @@index([ordenId, creadoEn]) // [MEJORA] el chat siempre se lee ordenado por fecha
   @@index([emisorId])
   @@map("mensajes_chat")
 }
@@ -601,7 +665,7 @@ model TransaccionWallet {
   wallet FixiWallet     @relation(fields: [walletId], references: [id], onDelete: Cascade)
   orden  OrdenServicio? @relation(fields: [ordenId], references: [id])
 
-  @@index([walletId])
+  @@index([walletId, creadoEn]) // [MEJORA] historial de movimientos, más reciente primero
   @@index([ordenId])
   @@map("transacciones_wallet")
 }
@@ -626,7 +690,7 @@ model OrdenTrazabilidad {
   orden              OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Cascade)
   cambiadoPorUsuario Usuario       @relation("TrazabilidadUsuario", fields: [cambiadoPorUsuarioId], references: [id])
 
-  @@index([ordenId])
+  @@index([ordenId, creadoEn]) // [MEJORA] línea de tiempo de la orden
   @@index([cambiadoPorUsuarioId])
   @@map("orden_trazabilidad")
 }
