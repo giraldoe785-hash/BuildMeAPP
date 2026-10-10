@@ -22,7 +22,7 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
 
   const passwordValidation = validateRegistrationPassword(password);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -48,19 +48,19 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      const res = registerClient({
-        name: name.trim(),
-        username: username.trim(),
-        password,
-        confirmPassword,
-      });
-      setIsLoading(false);
 
-      if (!res.success) {
-        setErrorMessage(res.message || "Error al crear la cuenta.");
-      }
-    }, 600);
+    const res = await registerClient({
+      name: name.trim(),
+      username: username.trim(),
+      password,
+      confirmPassword,
+    });
+
+    setIsLoading(false);
+
+    if (!res.success) {
+      setErrorMessage(res.message || "Error al crear la cuenta.");
+    }
   };
 
   return (
@@ -137,7 +137,6 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
               className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
           </div>
-
           {/* Indicador de requisitos en tiempo real */}
           <PasswordRequirements validation={passwordValidation} />
         </div>

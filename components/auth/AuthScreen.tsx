@@ -150,10 +150,10 @@ export const AuthScreen: React.FC = () => {
         <div className="text-center space-y-1 text-slate-400 text-[11px] pt-1">
           <p className="flex items-center justify-center gap-1.5">
             <Lock className="w-3 h-3 text-emerald-400" />
-            <span>Demostración de Autenticación & Roles en Frontend</span>
+            <span>Acceso seguro con sesión protegida</span>
           </p>
           <p className="text-[10px] text-slate-400">
-            Persistencia local mediante localStorage • Listo para integración con backend
+           Tus datos de acceso se validan en el servidor
           </p>
         </div>
       </div>

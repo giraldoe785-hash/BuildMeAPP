@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI, Type, MediaResolution, ThinkingLevel } from "@google/genai";
+import { getCurrentUser } from "@/lib/auth";
 
 const ALLOWED_MIMES = ["image/jpeg", "image/png", "video/mp4"];
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30 MB
+
 const VALID_CATEGORIES = [
   "electricidad",
   "plomeria",
@@ -14,6 +16,63 @@ const VALID_CATEGORIES = [
 
 // Timeout único de seguridad en servidor para la llamada a Gemini.
 const AI_TIMEOUT_MS = 30_000;
+
+// --- [MEJORA] Límites de uso: protegen la cuota gratuita de Gemini ---
+const MAX_PROMPT_LENGTH = 500;
+// El cuerpo incluye los campos del formulario además del archivo
+const MAX_CONTENT_LENGTH = MAX_FILE_SIZE + 1024 * 1024;
+const AI_USER_LIMIT = 10; // diagnósticos por usuario...
+const AI_USER_WINDOW_MS = 60 * 60 * 1000; // ...por hora
+const AI_DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT) || 200; // tope global por día
+
+// Contadores en memoria: valen para un solo servidor (típico de un proyecto
+// universitario). Se reinician al reiniciar el servidor.
+const userUsage = new Map<string, number[]>();
+let dailyUsage = { day: "", count: 0 };
+const todayKey = () => new Date().toISOString().slice(0, 10);
+
+function checkAiQuota(userId: string): string | null {
+  const now = Date.now();
+  const recent = (userUsage.get(userId) ?? []).filter((t) => now - t < AI_USER_WINDOW_MS);
+  userUsage.set(userId, recent);
+
+  if (recent.length >= AI_USER_LIMIT) {
+    return "Alcanzaste el límite de diagnósticos con IA por hora. Puedes escoger una falla del listado predefinido o intentarlo más tarde.";
+  }
+  if (dailyUsage.day === todayKey() && dailyUsage.count >= AI_DAILY_LIMIT) {
+    return "El diagnóstico con IA alcanzó su límite diario. Puedes escoger una falla del listado predefinido.";
+  }
+  return null;
+}
+
+function recordAiUse(userId: string): void {
+  const list = userUsage.get(userId) ?? [];
+  list.push(Date.now());
+  userUsage.set(userId, list);
+
+  if (dailyUsage.day !== todayKey()) {
+    dailyUsage = { day: todayKey(), count: 0 };
+  }
+  dailyUsage.count += 1;
+}
+
+// [MEJORA] El tipo MIME lo declara el cliente y se puede falsear: se comprueba
+// también el contenido real del archivo (firma de los primeros bytes).
+function matchesDeclaredType(buffer: Buffer, mime: string): boolean {
+  if (mime === "image/png") {
+    return (
+      buffer.length > 8 &&
+      buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    );
+  }
+  if (mime === "image/jpeg") {
+    return buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+  if (mime === "video/mp4") {
+    return buffer.length > 12 && buffer.subarray(4, 8).toString("ascii") === "ftyp";
+  }
+  return false;
+}
 
 const CATEGORY_NAMES: Record<string, string> = {
   electricidad: "Electricidad",
@@ -128,6 +187,7 @@ function getImageDimensions(
       const height = buffer.readUInt32BE(20);
       return { width, height };
     }
+
     // JPEG check
     if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
       let i = 2;
@@ -168,10 +228,50 @@ export async function POST(request: NextRequest) {
   let geminiStartTime = 0;
   let dimensions: { width: number; height: number } | null = null;
 
+  // [MEJORA] Solo clientes con sesión válida pueden usar el diagnóstico con IA
+  let usuario: Awaited<ReturnType<typeof getCurrentUser>>;
+  try {
+    usuario = await getCurrentUser();
+  } catch (error) {
+    console.error("[AI-DIAGNOSIS] Error verificando la sesión:", error);
+    return NextResponse.json(
+      { error: "No fue posible verificar tu sesión. Intenta de nuevo." },
+      { status: 500 }
+    );
+  }
+
+  if (!usuario) {
+    return NextResponse.json(
+      { error: "Debes iniciar sesión para usar el diagnóstico con IA." },
+      { status: 401 }
+    );
+  }
+  if (usuario.rol !== "CLIENTE" || usuario.estado === "SUSPENDIDO") {
+    return NextResponse.json(
+      { error: "Tu cuenta no puede solicitar diagnósticos con IA." },
+      { status: 403 }
+    );
+  }
+
+  const quotaMessage = checkAiQuota(usuario.id);
+  if (quotaMessage) {
+    return NextResponse.json({ error: quotaMessage }, { status: 429 });
+  }
+
+  // [MEJORA] Rechaza cuerpos enormes antes de leerlos completos en memoria
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_CONTENT_LENGTH) {
+    return NextResponse.json(
+      { error: `El archivo excede el tamaño máximo de ${MAX_FILE_SIZE / 1024 / 1024} MB.` },
+      { status: 413 }
+    );
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
+    console.error("[AI-DIAGNOSIS] GEMINI_API_KEY no está configurada");
     return NextResponse.json(
-      { error: "GEMINI_API_KEY no configurada en el servidor." },
+      { error: "El servicio de diagnóstico no está configurado." },
       { status: 500 }
     );
   }
@@ -191,7 +291,6 @@ export async function POST(request: NextRequest) {
   const userPrompt = formData.get("userPrompt") as string | null;
 
   // --- Validaciones de entrada ---
-
   if (!file) {
     return NextResponse.json(
       { error: "No se recibió ningún archivo." },
@@ -224,13 +323,27 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // --- Medición de lectura y conversión ---
+  if (userPrompt && userPrompt.length > MAX_PROMPT_LENGTH) {
+    return NextResponse.json(
+      { error: `La descripción no puede superar ${MAX_PROMPT_LENGTH} caracteres.` },
+      { status: 400 }
+    );
+  }
 
+  // --- Medición de lectura y conversión ---
   const tRead = Date.now();
   const arrayBuffer = await file.arrayBuffer();
   fileReadMs = Date.now() - tRead;
 
   const buffer = Buffer.from(arrayBuffer);
+
+  if (!matchesDeclaredType(buffer, file.type)) {
+    return NextResponse.json(
+      { error: "El contenido del archivo no coincide con su formato. Sube una foto JPG/PNG o un video MP4 válidos." },
+      { status: 400 }
+    );
+  }
+
   dimensions = getImageDimensions(buffer);
 
   const tBase64 = Date.now();
@@ -259,15 +372,17 @@ Reglas:
   * No instruir a usuarios no especializados a manipular conductores, barras, acometidas o componentes energizados.`;
 
   // --- Llamar a Gemini ---
-
   const modelName = process.env.GEMINI_MODEL;
   if (!modelName) {
     console.error("[AI-DIAGNOSIS] GEMINI_MODEL no está configurado en .env.local");
     return NextResponse.json(
-      { error: "Modelo de IA no configurado en el servidor." },
+      { error: "El servicio de diagnóstico no está configurado." },
       { status: 500 }
     );
   }
+
+  // [MEJORA] Se cuenta el uso solo cuando la solicitud ya es válida y va a costar cuota
+  recordAiUse(usuario.id);
 
   const abortController = new AbortController();
   let timeoutTriggered = false;
@@ -309,7 +424,6 @@ Reglas:
           abortSignal: abortController.signal,
         },
       });
-
       geminiMs = Date.now() - geminiStartTime;
       responseText = response.text ?? "";
     } finally {
@@ -317,7 +431,6 @@ Reglas:
     }
 
     // --- Medir y validar respuesta parseada ---
-
     const tParse = Date.now();
 
     if (!responseText || responseText.trim() === "") {
@@ -458,7 +571,6 @@ Reglas:
       priceRangeMax: finalPriceRangeMax,
       method: "Análisis_IA",
     });
-
   } catch (err: any) {
     clearTimeout(timeoutHandle);
     const totalMs = Date.now() - reqStart;

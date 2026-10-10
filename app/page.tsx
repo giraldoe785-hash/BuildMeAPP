@@ -18,14 +18,14 @@ import { AnimatePresence, motion } from "framer-motion";
 
 export default function App() {
   const { activeTab, activeOrder } = useFixiStore();
-  const { isAuthenticated, currentUser } = useAuthStore();
+  const { isAuthenticated, currentUser, isCheckingSession } = useAuthStore();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  if (!mounted) {
+  if (!mounted || isCheckingSession) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
         <div className="flex flex-col items-center gap-3">

@@ -17,7 +17,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -27,23 +27,27 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      const res = login(username, password);
-      setIsLoading(false);
-      if (!res.success) {
-        setErrorMessage(res.message || "Credenciales incorrectas.");
-      }
-    }, 600);
+
+    const res = await login(username, password);
+    setIsLoading(false);
+
+    if (!res.success) {
+      setErrorMessage(res.message || "Credenciales incorrectas.");
+    }
   };
 
-  const handleQuickDemoLogin = (demoUser: string, demoPass: string) => {
+  const handleQuickDemoLogin = async (demoUser: string, demoPass: string) => {
     setUsername(demoUser);
     setPassword(demoPass);
+    setErrorMessage(null);
     setIsLoading(true);
-    setTimeout(() => {
-      login(demoUser, demoPass);
-      setIsLoading(false);
-    }, 400);
+
+    const res = await login(demoUser, demoPass);
+    setIsLoading(false);
+
+    if (!res.success) {
+      setErrorMessage(res.message || "Credenciales incorrectas.");
+    }
   };
 
   return (
@@ -117,7 +121,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
           Acceso Rápido de Prueba (Demo)
         </p>
-
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
