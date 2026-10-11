@@ -258,8 +258,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: quotaMessage }, { status: 429 });
   }
 
-  // [MEJORA] Rechaza cuerpos enormes antes de leerlos completos en memoria
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  // [MEJORA] Rechaza cuerpos enormes antes de leerlos completos en memoria.
+  // Sin un Content-Length válido no se puede acotar el tamaño antes de leer el
+  // cuerpo, por eso un valor ausente, no numérico o 0 se rechaza con 411.
+  const contentLengthHeader = request.headers.get("content-length");
+  if (
+    contentLengthHeader === null ||
+    !/^\d+$/.test(contentLengthHeader.trim()) ||
+    Number(contentLengthHeader) === 0
+  ) {
+    return NextResponse.json(
+      { error: "La solicitud debe incluir un encabezado Content-Length válido (mayor que 0) con el tamaño del cuerpo." },
+      { status: 411 }
+    );
+  }
+  const contentLength = Number(contentLengthHeader);
   if (contentLength > MAX_CONTENT_LENGTH) {
     return NextResponse.json(
       { error: `El archivo excede el tamaño máximo de ${MAX_FILE_SIZE / 1024 / 1024} MB.` },
