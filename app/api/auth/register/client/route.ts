@@ -1,15 +1,13 @@
-import {
-  createSession,
-  hashPassword,
-  puedeIntentarLogin,
-  registrarIntentoFallido,
-} from "@/lib/auth";
+import { createSession, hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { createRateLimiter } from "@/lib/rateLimit";
 
 const PASSWORD_MIN_LENGTH = 7;
 const PASSWORD_MAX_LENGTH = 128; // evita contraseñas gigantes (abuso de CPU/memoria)
 const USERNAME_REGEX = /^[a-z0-9_.]{3,50}$/; // 50 = límite que ya tenías
 const NAME_MAX_LENGTH = 100;
+
+const registerLimiter = createRateLimiter({ max: 10, windowMs: 60 * 60 * 1000 });
 
 const PASSWORD_ERROR =
   "La contraseña debe tener mínimo 7 caracteres y contener al menos 2 números.";
@@ -52,15 +50,6 @@ function getClientIp(request: Request): string {
 
 export async function POST(request: Request) {
   try {
-    // Límite de registros por IP (reutiliza el limitador de lib/auth).
-    // Cuenta cada solicitud: evita que alguien cree cuentas en masa.
-    const claveLimite = `registro:${getClientIp(request)}`;
-
-    if (!puedeIntentarLogin(claveLimite)) {
-      return fail("Demasiados intentos. Intenta de nuevo en unos minutos.", 429);
-    }
-    registrarIntentoFallido(claveLimite);
-
     // Un JSON roto o vacío es un error del cliente (400), no del servidor (500)
     let body: unknown;
     try {
@@ -124,6 +113,17 @@ export async function POST(request: Request) {
     if (existingUser) {
       return fail("El nombre de usuario ya está registrado.", 409);
     }
+
+    // Límite de registros por IP: solo cuentan las solicitudes que ya pasaron
+    // toda la validación y llegan al hash. Sin await entre isLimited y record.
+    const ip = getClientIp(request);
+    if (registerLimiter.isLimited(ip)) {
+      return fail(
+        "Demasiados registros desde esta conexión. Intenta de nuevo más tarde.",
+        429
+      );
+    }
+    registerLimiter.record(ip);
 
     const passwordHash = await hashPassword(password);
 
