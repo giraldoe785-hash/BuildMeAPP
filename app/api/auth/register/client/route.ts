@@ -151,7 +151,15 @@ export async function POST(request: Request) {
       console.error("Cuenta creada pero falló la sesión:", sessionError);
     }
 
-    const { passwordHash: _, ...usuarioSeguro } = usuario;
+    // Nunca se devuelve el hash ni los campos internos de seguridad.
+    const {
+      passwordHash: _hash,
+      codigoVerificacion: _codigo,
+      codigoVerificacionExpiraEn: _codigoExpira,
+      intentosFallidosLogin: _intentos,
+      bloqueadoHasta: _bloqueo,
+      ...usuarioSeguro
+    } = usuario;
 
     return Response.json(
       {
