@@ -68,7 +68,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
                 setUsername(e.target.value);
                 setErrorMessage(null);
               }}
-              placeholder="Ej. sofia_navarro o cliente_demo"
+              placeholder="Ej. sofia_navarro"
               className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
           </div>
@@ -117,36 +117,39 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
       </form>
 
       {/* Quick Demo Accounts for Testing */}
-      <div className="pt-3 border-t border-slate-100 space-y-2">
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
-          Acceso Rápido de Prueba (Demo)
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => handleQuickDemoLogin("cliente_demo", "123456")}
-            className="p-2.5 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 rounded-xl text-left transition-colors"
-          >
-            <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-800">
-              <Sparkles className="w-3 h-3 text-emerald-600" />
-              <span>Cliente Demo</span>
-            </div>
-            <p className="text-[10px] text-emerald-600 font-mono mt-0.5">cliente_demo</p>
-          </button>
+      {(process.env.NODE_ENV !== "production" ||
+        process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === "true") && (
+        <div className="pt-3 border-t border-slate-100 space-y-2">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
+            Acceso Rápido de Prueba (Demo)
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleQuickDemoLogin("cliente_demo", "123456")}
+              className="p-2.5 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 rounded-xl text-left transition-colors"
+            >
+              <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-800">
+                <Sparkles className="w-3 h-3 text-emerald-600" />
+                <span>Cliente Demo</span>
+              </div>
+              <p className="text-[10px] text-emerald-600 font-mono mt-0.5">cliente_demo</p>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => handleQuickDemoLogin("reparador_demo", "123456")}
-            className="p-2.5 bg-amber-50 hover:bg-amber-100/80 border border-amber-200 rounded-xl text-left transition-colors"
-          >
-            <div className="flex items-center gap-1 text-[11px] font-bold text-amber-900">
-              <Sparkles className="w-3 h-3 text-amber-600" />
-              <span>Reparador Demo</span>
-            </div>
-            <p className="text-[10px] text-amber-700 font-mono mt-0.5">reparador_demo</p>
-          </button>
+            <button
+              type="button"
+              onClick={() => handleQuickDemoLogin("reparador_demo", "123456")}
+              className="p-2.5 bg-amber-50 hover:bg-amber-100/80 border border-amber-200 rounded-xl text-left transition-colors"
+            >
+              <div className="flex items-center gap-1 text-[11px] font-bold text-amber-900">
+                <Sparkles className="w-3 h-3 text-amber-600" />
+                <span>Reparador Demo</span>
+              </div>
+              <p className="text-[10px] text-amber-700 font-mono mt-0.5">reparador_demo</p>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Switch to Register */}
       <div className="text-center pt-2">

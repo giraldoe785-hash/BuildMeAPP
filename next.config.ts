@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
     ],
   },
   poweredByHeader: false,
+  env: {
+    NEXT_PUBLIC_SHOW_DEMO_LOGIN: process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN ?? "false",
+  },
   async headers() {
     return [
       {
