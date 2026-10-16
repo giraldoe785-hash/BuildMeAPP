@@ -112,10 +112,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const hashAComparar = usuario ? usuario.passwordHash : await getHashSenuelo();
+    const hashAComparar = usuario?.passwordHash ?? (await getHashSenuelo());
     const passwordCorrecta = await verifyPassword(password, hashAComparar);
 
-    if (!usuario || !passwordCorrecta) {
+    if (!usuario || !usuario.passwordHash || !passwordCorrecta) {
       if (limitarPorIp) registrarIntentoFallido(claveIp);
       if (usuario) await registrarFalloDeCuenta(usuario.id);
       return fail(CREDENCIALES_INVALIDAS, 401);

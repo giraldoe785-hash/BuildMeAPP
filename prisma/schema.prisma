@@ -24,6 +24,22 @@ datasource db {
 // ENUMS
 // ============================================================
 
+enum ProveedorOAuth {
+  GOOGLE
+  MICROSOFT_ENTRA_ID
+
+  @@map("proveedor_oauth")
+}
+
+enum TipoDesafioMfa {
+  LOGIN_LOCAL
+  LOGIN_OAUTH
+  REGISTRO
+  VINCULAR_CORREO
+
+  @@map("tipo_desafio_mfa")
+}
+
 enum RolUsuario {
   CLIENTE
   REPARADOR
@@ -193,7 +209,7 @@ model Usuario {
   email         String?      @unique @db.VarChar(150)
   nombreUsuario String       @unique @db.VarChar(50)
   telefono      String?      @unique @db.VarChar(30)
-  passwordHash  String       @db.VarChar(255)
+  passwordHash  String?      @db.VarChar(255)
   rol           RolUsuario   @default(CLIENTE)
   estado        EstadoCuenta @default(PENDIENTE_VERIFICACION)
 
@@ -230,6 +246,8 @@ model Usuario {
   reembolsosAutorizados        ReembolsoTransaccion[] @relation("ReembolsoAutorizador")
   reembolsosSegundoAutorizador ReembolsoTransaccion[] @relation("ReembolsoSegundoAutorizador")
   sesionUsuarios               SesionUsuario[]
+  identidadesOAuth             IdentidadOAuth[]
+  desafiosMfa                  DesafioMfa[]
 
   @@map("usuarios")
 }
@@ -848,4 +866,43 @@ model SesionUsuario {
   @@index([usuarioId, revocado])
   @@index([fechaExpira])
   @@map("sesiones_usuario")
+}
+
+model IdentidadOAuth {
+  id                 String         @id @default(uuid()) @db.Uuid
+  usuarioId          String         @db.Uuid
+  proveedor          ProveedorOAuth
+  proveedorAccountId String         @db.VarChar(255)
+  correoProveedor    String?        @db.VarChar(150)
+  creadoEn           DateTime       @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([proveedor, proveedorAccountId])
+  @@index([usuarioId])
+  @@map("identidades_oauth")
+}
+
+model DesafioMfa {
+  id                 String          @id @default(uuid()) @db.Uuid
+  usuarioId          String?         @db.Uuid
+  tokenHash          String          @unique @db.VarChar(64)
+  codigoHash         String?         @db.VarChar(64)
+  correoDestino      String?         @db.VarChar(150)
+  tipo               TipoDesafioMfa
+  proveedor          ProveedorOAuth?
+  proveedorAccountId String?         @db.VarChar(255)
+  nombreProveedor    String?         @db.VarChar(200)
+  intentos           Int             @default(0)
+  reenvios           Int             @default(0)
+  fechaUltimoEnvio   DateTime?
+  fechaExpira        DateTime
+  consumidoEn        DateTime?
+  creadoEn           DateTime        @default(now())
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, consumidoEn])
+  @@index([fechaExpira])
+  @@map("desafios_mfa")
 }
