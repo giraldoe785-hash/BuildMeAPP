@@ -18,7 +18,7 @@ export interface ServiceCategory {
   bgLight: string;
 }
 
-export type UserRole = "client" | "repairer";
+export type UserRole = "client" | "repairer" | "admin";
 export type VerificationStatus = "pending" | "approved" | "rejected";
 
 export interface AuthUser {

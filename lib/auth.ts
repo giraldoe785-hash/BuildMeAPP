@@ -1,23 +1,29 @@
 import {
   createHash,
+  createHmac,
   randomBytes,
-  scrypt as scryptCallback,
+  randomInt,
   timingSafeEqual,
 } from "node:crypto";
-import { promisify } from "node:util";
 import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/prisma";
+import {
+  HASH_ALGO_TAG,
+  PASSWORD_KEY_LENGTH,
+  hashPassword,
+  verifyPassword,
+} from "./passwordCrypto";
 
-const scrypt = promisify(scryptCallback);
+export {
+  HASH_ALGO_TAG,
+  PASSWORD_KEY_LENGTH,
+  hashPassword,
+  verifyPassword,
+};
 
 const SESSION_COOKIE_NAME = "buildmeapp_session";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7;
-const PASSWORD_KEY_LENGTH = 64;
-
-// Prefijo de versión del algoritmo. Si en el futuro cambias los parámetros
-// de scrypt, puedes agregar "scrypt2" sin romper los hashes ya guardados.
-const HASH_ALGO_TAG = "scrypt1";
 
 // --- Rate limiting básico para login (gratis, sin librerías externas) ---
 // NOTA: esto vive en memoria, así que solo funciona si tu app corre en
@@ -60,69 +66,79 @@ export function limpiarIntentosLogin(identificador: string): void {
   intentosLogin.delete(identificador);
 }
 
-// --- Hash y verificación de contraseñas ---
+// --- Códigos de verificación de correo (6 dígitos) y tokens de recuperación ---
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex");
+function getServerHmacSecret(): string {
+  const secret =
+    process.env.AUTH_SECRET?.trim() ||
+    process.env.NEXTAUTH_SECRET?.trim() ||
+    process.env.DATABASE_URL?.trim() ||
+    "buildmeapp-fallback-hmac-key";
+  return secret;
+}
 
+/**
+ * Genera un código numérico aleatorio criptográficamente seguro de 6 dígitos.
+ */
+export function generateSixDigitCode(): string {
+  return randomInt(0, 1_000_000).toString().padStart(6, "0");
+}
+
+/**
+ * Calcula un HMAC-SHA256 ligado al usuario y propósito para no almacenar el
+ * código de 6 dígitos en texto plano.
+ */
+export function hashVerificationCode(
+  usuarioId: string,
+  correoDestino: string,
+  codigo: string
+): string {
+  return createHmac("sha256", getServerHmacSecret())
+    .update(`email-verify:v1:${usuarioId}:${correoDestino.toLowerCase()}:${codigo}`)
+    .digest("hex");
+}
+
+/**
+ * Compara en tiempo constante el código recibido con el hash almacenado.
+ */
+export function verifyVerificationCodeHash(
+  usuarioId: string,
+  correoDestino: string,
+  codigo: string,
+  storedHash: string
+): boolean {
   try {
-    const derivedKey = (await scrypt(
-      password,
-      salt,
-      PASSWORD_KEY_LENGTH
-    )) as Buffer;
-
-    return `${HASH_ALGO_TAG}:${salt}:${derivedKey.toString("hex")}`;
-  } catch (error) {
-    console.error("Error generando hash de contraseña:", error);
-    throw new Error("No se pudo procesar la contraseña. Intenta de nuevo.");
+    const expectedHex = hashVerificationCode(usuarioId, correoDestino, codigo);
+    const expectedBuf = Buffer.from(expectedHex, "hex");
+    const storedBuf = Buffer.from(storedHash, "hex");
+    if (expectedBuf.length !== storedBuf.length || expectedBuf.length === 0) {
+      return false;
+    }
+    return timingSafeEqual(expectedBuf, storedBuf);
+  } catch {
+    return false;
   }
 }
 
-export async function verifyPassword(
-  password: string,
-  storedPasswordHash: string
-): Promise<boolean> {
-  const partes = storedPasswordHash.split(":");
+/**
+ * Genera un token aleatorio de alta entropía (256 bits) para recuperación de contraseña.
+ */
+export function generatePasswordResetToken(): {
+  token: string;
+  tokenHash: string;
+} {
+  const token = randomBytes(32).toString("hex");
+  const tokenHash = hashPasswordResetToken(token);
+  return { token, tokenHash };
+}
 
-  // Soporta tanto el formato nuevo ("scrypt1:salt:hash") como el formato
-  // viejo sin tag de versión ("salt:hash"), para no romper cuentas ya
-  // existentes si migras este archivo sobre una BD en uso.
-  let salt: string | undefined;
-  let storedKeyHex: string | undefined;
-
-  if (partes.length === 3 && partes[0] === HASH_ALGO_TAG) {
-    [, salt, storedKeyHex] = partes;
-  } else if (partes.length === 2) {
-    [salt, storedKeyHex] = partes;
-  } else {
-    return false;
-  }
-
-  if (!salt || !storedKeyHex) {
-    return false;
-  }
-
-  try {
-    const storedKey = Buffer.from(storedKeyHex, "hex");
-
-    const derivedKey = (await scrypt(
-      password,
-      salt,
-      PASSWORD_KEY_LENGTH
-    )) as Buffer;
-
-    if (storedKey.length !== derivedKey.length) {
-      return false;
-    }
-
-    return timingSafeEqual(storedKey, derivedKey);
-  } catch (error) {
-    // Falla "cerrado": cualquier error en la verificación se trata como
-    // contraseña inválida, nunca como autenticación exitosa.
-    console.error("Error verificando contraseña:", error);
-    return false;
-  }
+/**
+ * Calcula el hash SHA-256 de un token de recuperación de contraseña.
+ */
+export function hashPasswordResetToken(token: string): string {
+  return createHash("sha256")
+    .update(`pwd-reset:v1:${token}`)
+    .digest("hex");
 }
 
 // --- Sesiones ---
@@ -162,6 +178,23 @@ export async function createSession(usuarioId: string): Promise<Date> {
   return fechaExpira;
 }
 
+export const USUARIO_INCLUDE = {
+  perfilCliente: true,
+  perfilReparador: {
+    include: {
+      especialidades: {
+        include: {
+          categoria: true,
+        },
+      },
+      documentos: {
+        orderBy: { creadoEn: "desc" as const },
+        take: 1,
+      },
+    },
+  },
+} as const;
+
 export async function getCurrentUser() {
   const cookieStore = await cookies();
 
@@ -179,10 +212,7 @@ export async function getCurrentUser() {
     },
     include: {
       usuario: {
-        include: {
-          perfilCliente: true,
-          perfilReparador: true,
-        },
+        include: USUARIO_INCLUDE,
       },
     },
   });

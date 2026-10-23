@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useAuthStore, validateRegistrationPassword, PASSWORD_VALIDATION_ERROR_MESSAGE } from "@/store/useAuthStore";
 import { SERVICE_CATEGORIES } from "@/data/services";
 import { ServiceCategoryId } from "@/types";
-import { User, Lock, CreditCard, Wrench, Upload, FileText, AlertCircle, Clock, CheckCircle2, UserPlus, AlertTriangle } from "lucide-react";
+import { User, MapPin, Wrench, Upload, FileText, AlertCircle, Clock, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PasswordRequirements } from "./PasswordRequirements";
 
@@ -20,9 +20,11 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [cedula, setCedula] = useState("");
+  const [city, setCity] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [specialty, setSpecialty] = useState<ServiceCategoryId>("electricidad");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [selectedFile, setSelectedFile] = useState<{
     name: string;
     type: string;
@@ -52,7 +54,12 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
       return;
     }
 
-    const sizeFormatted = (file.size / (1024 * 1024)).toFixed(1) + " MB";
+    const sizeFormatted =
+      file.size >= 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+
+    setDocumentFile(file);
     setSelectedFile({
       name: file.name,
       type: file.type || "application/pdf",
@@ -61,18 +68,23 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
     setErrorMessage(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
     // Validaciones
-    if (!name.trim() || !username.trim() || !cedula.trim() || !password || !confirmPassword) {
+    if (!name.trim() || !username.trim() || !cedula.trim() || !city.trim() || !password || !confirmPassword) {
       setErrorMessage("Todos los campos son obligatorios.");
       return;
     }
 
     if (cedula.trim().length < 6) {
       setErrorMessage("Por favor ingresa un número de cédula válido (mínimo 6 dígitos).");
+      return;
+    }
+
+    if (city.trim().length < 2) {
+      setErrorMessage("Ingresa una ciudad de cobertura válida.");
       return;
     }
 
@@ -86,28 +98,27 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
       return;
     }
 
-    if (!selectedFile) {
+    if (!documentFile || !selectedFile) {
       setErrorMessage("Debes adjuntar tu documento de acreditación o certificación (PDF, JPG, PNG).");
       return;
     }
 
     setIsLoading(true);
-    setTimeout(() => {
-      const res = registerRepairer({
-        name: name.trim(),
-        username: username.trim(),
-        cedula: cedula.trim(),
-        password,
-        confirmPassword,
-        specialty,
-        documentFile: selectedFile,
-      });
-      setIsLoading(false);
+    const res = await registerRepairer({
+      name: name.trim(),
+      username: username.trim(),
+      cedula: cedula.trim(),
+      city: city.trim(),
+      password,
+      confirmPassword,
+      specialty,
+      documentFile,
+    });
+    setIsLoading(false);
 
-      if (!res.success) {
-        setErrorMessage(res.message || "Error al crear la cuenta de reparador.");
-      }
-    }, 600);
+    if (!res.success) {
+      setErrorMessage(res.message || "Error al crear la cuenta de reparador.");
+    }
   };
 
   return (
@@ -119,7 +130,7 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
           <span>Estado inicial: 🟡 Pendiente de verificación</span>
         </div>
         <p className="text-[11px] text-amber-800 leading-relaxed">
-          Tu documentación será revisada cuando BuildMeAPP incorpore el sistema administrativo de validación en backend.
+          Tu documentación quedará guardada en revisión hasta que un administrador valide tu acreditación profesional.
         </p>
       </div>
 
@@ -139,7 +150,7 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
                 setName(e.target.value);
                 setErrorMessage(null);
               }}
-              placeholder="Ej. Ing. Carlos Mendoza"
+              placeholder="Ej. Carlos Mendoza"
               className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
           </div>
@@ -178,6 +189,27 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
               }}
               placeholder="0928374615"
               className="w-full text-xs px-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900 font-mono"
+            />
+          </div>
+        </div>
+
+        {/* Ciudad de cobertura */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">
+            Ciudad de cobertura
+          </label>
+          <div className="relative">
+            <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
+            <input
+              type="text"
+              required
+              value={city}
+              onChange={(e) => {
+                setCity(e.target.value);
+                setErrorMessage(null);
+              }}
+              placeholder="Ej. Bogotá, Medellín, Quito..."
+              className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
           </div>
         </div>

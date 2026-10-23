@@ -1,15 +1,30 @@
 "use client";
 
 import React, { useState } from "react";
-import { useAuthStore } from "@/store/useAuthStore";
-import { User, Lock, ArrowRight, AlertCircle, Sparkles, CheckCircle2 } from "lucide-react";
+import { useAuthStore, type VerificationCodeStatus } from "@/store/useAuthStore";
+import { User, Lock, ArrowRight, AlertCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+
+export interface PendingVerificationInfo {
+  username?: string;
+  email?: string;
+  message?: string;
+  codeStatus: VerificationCodeStatus;
+  cooldownSeconds: number;
+  expiresInSeconds?: number;
+}
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
+  onForgotPassword: () => void;
+  onRequireEmailVerification?: (info: PendingVerificationInfo) => void;
 }
 
-export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
+export const LoginForm: React.FC<LoginFormProps> = ({
+  onSwitchToRegister,
+  onForgotPassword,
+  onRequireEmailVerification,
+}) => {
   const { login } = useAuthStore();
 
   const [username, setUsername] = useState("");
@@ -32,6 +47,17 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
     setIsLoading(false);
 
     if (!res.success) {
+      if (res.requiresEmailVerification && onRequireEmailVerification) {
+        onRequireEmailVerification({
+          username: res.username || username.trim(),
+          email: res.email,
+          message: res.message,
+          codeStatus: res.codeStatus ?? "existing",
+          cooldownSeconds: res.cooldownSeconds ?? 0,
+          expiresInSeconds: res.expiresInSeconds,
+        });
+        return;
+      }
       setErrorMessage(res.message || "Credenciales incorrectas.");
     }
   };
@@ -76,9 +102,18 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToRegister }) => {
 
         {/* Password */}
         <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">
-            Contraseña
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-xs font-bold text-slate-700">
+              Contraseña
+            </label>
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              className="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-500 rounded"
+            >
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
           <div className="relative">
             <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
             <input

@@ -1,24 +1,46 @@
 "use client";
 
 import React, { useState } from "react";
-import { useAuthStore, validateRegistrationPassword, PASSWORD_VALIDATION_ERROR_MESSAGE } from "@/store/useAuthStore";
-import { User, Lock, UserPlus, AlertCircle, CheckCircle2, ArrowRight } from "lucide-react";
+import {
+  useAuthStore,
+  validateRegistrationPassword,
+  type VerificationCodeStatus,
+} from "@/store/useAuthStore";
+import { User, Lock, Mail, UserPlus, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PasswordRequirements } from "./PasswordRequirements";
+import { VerifyEmailForm } from "./VerifyEmailForm";
+import {
+  normalizeEmail,
+  normalizeUsername,
+  validateClientRegistration,
+} from "@/lib/registrationValidation";
 
 interface RegisterClientFormProps {
   onSwitchToLogin: () => void;
 }
 
-export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitchToLogin }) => {
+export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({
+  onSwitchToLogin,
+}) => {
   const { registerClient } = useAuthStore();
 
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const [verificationState, setVerificationState] = useState<{
+    email: string;
+    username: string;
+    codeStatus: VerificationCodeStatus;
+    cooldownSeconds: number;
+    expiresInSeconds?: number;
+    message?: string;
+  } | null>(null);
 
   const passwordValidation = validateRegistrationPassword(password);
 
@@ -26,42 +48,69 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
     e.preventDefault();
     setErrorMessage(null);
 
-    // Validaciones locales
-    if (!name.trim() || !username.trim() || !password || !confirmPassword) {
-      setErrorMessage("Todos los campos son obligatorios.");
-      return;
-    }
+    const trimmedName = name.trim();
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedUsername = normalizeUsername(username);
 
-    if (username.trim().length < 3) {
-      setErrorMessage("El nombre de usuario debe tener mínimo 3 caracteres.");
-      return;
-    }
-
-    if (!passwordValidation.isValid) {
-      setErrorMessage(PASSWORD_VALIDATION_ERROR_MESSAGE);
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setErrorMessage("La confirmación no coincide con la contraseña.");
+    // Mismas reglas que el servidor (lib/registrationValidation.ts): evita enviar
+    // peticiones que se sabe que terminarían en 400.
+    const validationError = validateClientRegistration({
+      name: trimmedName,
+      email: normalizedEmail,
+      username: normalizedUsername,
+      password,
+      confirmPassword,
+    });
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
 
     setIsLoading(true);
 
     const res = await registerClient({
-      name: name.trim(),
-      username: username.trim(),
+      name: trimmedName,
+      email: normalizedEmail,
+      username: normalizedUsername,
       password,
       confirmPassword,
     });
 
     setIsLoading(false);
 
+    // Solo se abre la pantalla del código si el servidor confirmó el envío (201) o
+    // que ya hay un código vigente (200). Cualquier error se muestra aquí mismo.
+    if (res.success && res.requiresEmailVerification) {
+      setVerificationState({
+        email: res.email || normalizedEmail,
+        username: res.username || normalizedUsername,
+        codeStatus: res.codeStatus ?? "sent",
+        cooldownSeconds: res.cooldownSeconds ?? 0,
+        expiresInSeconds: res.expiresInSeconds,
+        message: res.message,
+      });
+      return;
+    }
+
     if (!res.success) {
       setErrorMessage(res.message || "Error al crear la cuenta.");
     }
   };
+
+  if (verificationState) {
+    return (
+      <VerifyEmailForm
+        email={verificationState.email}
+        username={verificationState.username}
+        codeStatus={verificationState.codeStatus}
+        initialCooldownSeconds={verificationState.cooldownSeconds}
+        expiresInSeconds={verificationState.expiresInSeconds}
+        notice={verificationState.message}
+        onBack={() => setVerificationState(null)}
+        onSwitchToLogin={onSwitchToLogin}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -92,6 +141,28 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({ onSwitch
                 setErrorMessage(null);
               }}
               placeholder="Ej. Sofía Navarro"
+              className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
+            />
+          </div>
+        </div>
+
+        {/* Correo electrónico */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">
+            Correo electrónico
+          </label>
+          <div className="relative">
+            <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setErrorMessage(null);
+              }}
+              placeholder="Ej. sofia@ejemplo.com"
               className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
           </div>

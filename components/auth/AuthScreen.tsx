@@ -1,14 +1,23 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { LoginForm } from "./LoginForm";
+import { LoginForm, type PendingVerificationInfo } from "./LoginForm";
 import { RegisterClientForm } from "./RegisterClientForm";
 import { RegisterRepairerForm } from "./RegisterRepairerForm";
+import { ForgotPasswordForm } from "./ForgotPasswordForm";
+import { VerifyEmailForm } from "./VerifyEmailForm";
 import { iniciarOAuth } from "@/app/actions/oauth";
 import { Wrench, UserCheck, Lock, AlertCircle, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-type AuthViewMode = "login" | "register_select" | "register_client" | "register_repairer";
+type AuthViewMode =
+  | "login"
+  | "register_select"
+  | "register_client"
+  | "register_repairer"
+  | "forgot_password"
+  | "verify_email";
+
 type OAuthProviderButtonId = "google";
 
 function getOAuthErrorMessage(code: string | null): string | null {
@@ -67,6 +76,8 @@ export const AuthScreen: React.FC = () => {
   const [viewMode, setViewMode] = useState<AuthViewMode>("login");
   const [oauthLoading, setOauthLoading] = useState<OAuthProviderButtonId | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [pendingVerificationInfo, setPendingVerificationInfo] =
+    useState<PendingVerificationInfo | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -100,6 +111,13 @@ export const AuthScreen: React.FC = () => {
 
     window.location.assign(result.url);
   };
+
+  const isRegisterMode =
+    viewMode === "register_select" ||
+    viewMode === "register_client" ||
+    viewMode === "register_repairer";
+
+  const showSocialLogin = viewMode === "login" || isRegisterMode;
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col justify-center p-4 sm:p-6">
@@ -135,9 +153,10 @@ export const AuthScreen: React.FC = () => {
               onClick={() => {
                 setViewMode("login");
                 setOauthError(null);
+                setPendingVerificationInfo(null);
               }}
               className={`py-2 rounded-xl transition-all ${
-                viewMode === "login"
+                viewMode === "login" || viewMode === "forgot_password"
                   ? "bg-white text-slate-900 shadow-xs"
                   : "text-slate-500 hover:text-slate-800"
               }`}
@@ -149,9 +168,10 @@ export const AuthScreen: React.FC = () => {
               onClick={() => {
                 setViewMode("register_select");
                 setOauthError(null);
+                setPendingVerificationInfo(null);
               }}
               className={`py-2 rounded-xl transition-all ${
-                viewMode !== "login"
+                isRegisterMode || viewMode === "verify_email"
                   ? "bg-white text-slate-900 shadow-xs"
                   : "text-slate-500 hover:text-slate-800"
               }`}
@@ -161,7 +181,7 @@ export const AuthScreen: React.FC = () => {
           </div>
 
           {/* Sub-selector for Register: Cliente vs Reparador */}
-          {viewMode !== "login" && (
+          {isRegisterMode && (
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 type="button"
@@ -208,39 +228,41 @@ export const AuthScreen: React.FC = () => {
           )}
 
           {/* OAuth Social Login Section (Google activo; Microsoft reservado para fase posterior) */}
-          <div className="space-y-2.5">
-            {oauthError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{oauthError}</span>
+          {showSocialLogin && (
+            <div className="space-y-2.5">
+              {oauthError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{oauthError}</span>
+                </div>
+              )}
+
+              <div>
+                <button
+                  type="button"
+                  disabled={oauthLoading !== null}
+                  onClick={() => handleOAuthLogin("google")}
+                  className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-800 text-xs font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-2xs"
+                >
+                  {oauthLoading === "google" ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-500 shrink-0" />
+                  ) : (
+                    <GoogleIcon />
+                  )}
+                  <span>Continuar con Google</span>
+                </button>
               </div>
-            )}
 
-            <div>
-              <button
-                type="button"
-                disabled={oauthLoading !== null}
-                onClick={() => handleOAuthLogin("google")}
-                className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-800 text-xs font-bold transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-2xs"
-              >
-                {oauthLoading === "google" ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-slate-500 shrink-0" />
-                ) : (
-                  <GoogleIcon />
-                )}
-                <span>Continuar con Google</span>
-              </button>
+              {/* Separador visual */}
+              <div className="relative flex items-center py-1">
+                <div className="grow border-t border-slate-200" />
+                <span className="shrink-0 mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  o con usuario y contraseña
+                </span>
+                <div className="grow border-t border-slate-200" />
+              </div>
             </div>
-
-            {/* Separador visual */}
-            <div className="relative flex items-center py-1">
-              <div className="grow border-t border-slate-200" />
-              <span className="shrink-0 mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                o con usuario y contraseña
-              </span>
-              <div className="grow border-t border-slate-200" />
-            </div>
-          </div>
+          )}
 
           {/* Dynamic Views */}
           <AnimatePresence mode="wait">
@@ -252,7 +274,52 @@ export const AuthScreen: React.FC = () => {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15 }}
               >
-                <LoginForm onSwitchToRegister={() => setViewMode("register_client")} />
+                <LoginForm
+                  onSwitchToRegister={() => setViewMode("register_client")}
+                  onForgotPassword={() => {
+                    setOauthError(null);
+                    setViewMode("forgot_password");
+                  }}
+                  onRequireEmailVerification={(info) => {
+                    setPendingVerificationInfo(info);
+                    setViewMode("verify_email");
+                  }}
+                />
+              </motion.div>
+            )}
+
+            {viewMode === "forgot_password" && (
+              <motion.div
+                key="view-forgot-password"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.15 }}
+              >
+                <ForgotPasswordForm
+                  onBackToLogin={() => setViewMode("login")}
+                />
+              </motion.div>
+            )}
+
+            {viewMode === "verify_email" && (
+              <motion.div
+                key="view-verify-email"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.15 }}
+              >
+                <VerifyEmailForm
+                  email={pendingVerificationInfo?.email}
+                  username={pendingVerificationInfo?.username}
+                  codeStatus={pendingVerificationInfo?.codeStatus ?? "existing"}
+                  initialCooldownSeconds={pendingVerificationInfo?.cooldownSeconds ?? 0}
+                  expiresInSeconds={pendingVerificationInfo?.expiresInSeconds}
+                  notice={pendingVerificationInfo?.message}
+                  onBack={() => setViewMode("login")}
+                  onSwitchToLogin={() => setViewMode("login")}
+                />
               </motion.div>
             )}
 

@@ -4,8 +4,9 @@ import React, { useState } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useFixiStore } from "@/store/useFixiStore";
 import { SERVICE_CATEGORIES } from "@/data/services";
-import { Wrench, Clock, ShieldCheck, MapPin, FileText, CheckCircle2, AlertTriangle, LogOut, DollarSign, Star, Sparkles, Navigation, UserCheck, ArrowRight, Bell } from "lucide-react";
+import { Wrench, Clock, ShieldCheck, MapPin, FileText, CheckCircle2, AlertTriangle, LogOut, DollarSign, Star, Sparkles, Navigation, UserCheck, ArrowRight, Bell, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { UserSupportModal } from "@/components/support/UserSupportModal";
 import confetti from "canvas-confetti";
 
 export const RepairerDashboard: React.FC = () => {
@@ -13,6 +14,7 @@ export const RepairerDashboard: React.FC = () => {
   const { isOnline, activeOrder, acceptOrder, setOrderStatus, validateOtpCode } = useFixiStore();
 
   const [activeTabRepairer, setActiveTabRepairer] = useState<"requests" | "active_job" | "documents" | "profile">("requests");
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [acceptedJob, setAcceptedJob] = useState<{
     id: string;
     clientName: string;
@@ -161,13 +163,24 @@ export const RepairerDashboard: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={logout}
-            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
-            title="Cerrar Sesión"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setIsSupportOpen(true)}
+              className="flex items-center gap-1 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-xl transition-colors"
+              title="Centro de Soporte y Mediación"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Soporte</span>
+            </button>
+            <button
+              onClick={logout}
+              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+              title="Cerrar Sesión"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -481,6 +494,16 @@ export const RepairerDashboard: React.FC = () => {
             </div>
 
             <Button
+              variant="outline"
+              size="md"
+              className="w-full text-emerald-700 border-emerald-300 bg-emerald-50 hover:bg-emerald-100 mt-2"
+              onClick={() => setIsSupportOpen(true)}
+            >
+              <HelpCircle className="w-4 h-4 mr-1.5" />
+              <span>Centro de Soporte y Mediación</span>
+            </Button>
+
+            <Button
               variant="secondary"
               size="md"
               className="w-full text-rose-600 hover:text-rose-700 mt-2"
@@ -492,6 +515,11 @@ export const RepairerDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      <UserSupportModal
+        isOpen={isSupportOpen}
+        onClose={() => setIsSupportOpen(false)}
+      />
     </div>
   );
 };

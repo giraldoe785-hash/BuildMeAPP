@@ -32,6 +32,7 @@ export async function GET() {
     // campos internos de seguridad.
     const {
       codigoVerificacion: _codigo,
+      codigoVerificacionExpiraEn: _codigoExpira,
       intentosFallidosLogin: _intentos,
       bloqueadoHasta: _bloqueo,
       ...usuarioSeguro

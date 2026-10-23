@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useFixiStore } from "@/store/useFixiStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { User, ShieldCheck, CreditCard, MapPin, Bell, Globe, Smartphone, HelpCircle, LogOut, CheckCircle2, Wifi } from "lucide-react";
+import { UserSupportModal } from "@/components/support/UserSupportModal";
 
 export const ProfileView: React.FC = () => {
   const {
@@ -16,6 +17,7 @@ export const ProfileView: React.FC = () => {
   } = useFixiStore();
 
   const { currentUser, logout } = useAuthStore();
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col p-4 pb-28 space-y-4">
@@ -93,6 +95,28 @@ export const ProfileView: React.FC = () => {
           <span className="text-xs font-bold text-slate-400">Administrar</span>
         </div>
 
+        {/* Centro de Ayuda y Soporte (HU21 / HU23) */}
+        <div className="p-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <HelpCircle className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-900">Centro de Ayuda y Soporte</p>
+              <p className="text-[11px] text-slate-500">
+                Radicar tickets, reclamos y chat de mediación
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsSupportOpen(true)}
+            className="text-xs font-bold text-emerald-600 hover:text-emerald-700 px-2.5 py-1 rounded-xl hover:bg-emerald-50 transition-colors shrink-0"
+          >
+            Abrir
+          </button>
+        </div>
+
         {/* Offline Toggle Simulation */}
         <div className="p-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -137,6 +161,11 @@ export const ProfileView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <UserSupportModal
+        isOpen={isSupportOpen}
+        onClose={() => setIsSupportOpen(false)}
+      />
     </div>
   );
 };

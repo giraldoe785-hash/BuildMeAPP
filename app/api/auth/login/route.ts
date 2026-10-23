@@ -4,8 +4,13 @@ import {
   limpiarIntentosLogin,
   puedeIntentarLogin,
   registrarIntentoFallido,
+  USUARIO_INCLUDE,
   verifyPassword,
 } from "@/lib/auth";
+import {
+  isPendingTraditionalAccount,
+  issueEmailVerificationCode,
+} from "@/lib/emailVerification";
 import { prisma } from "@/lib/prisma";
 
 const USERNAME_MAX_LENGTH = 50; // mismo límite que la columna y el registro
@@ -101,7 +106,10 @@ export async function POST(request: Request) {
 
     const usuario = await prisma.usuario.findUnique({
       where: { nombreUsuario: username },
-      include: { perfilCliente: true, perfilReparador: true },
+      include: {
+        ...USUARIO_INCLUDE,
+        identidadesOAuth: { select: { id: true } },
+      },
     });
 
     // Cuenta bloqueada temporalmente: ni siquiera se verifica la contraseña.
@@ -122,14 +130,11 @@ export async function POST(request: Request) {
     }
 
     // Solo después de acertar la contraseña se revela el estado de la cuenta.
-    // PENDIENTE_VERIFICACION, EN_REVISION y RECHAZADO sí pueden entrar: el
-    // cliente recién registrado ya tiene sesión, y el reparador necesita ver
-    // el estado de su acreditación (HU-20).
     if (usuario.estado === "SUSPENDIDO") {
       return fail("Tu cuenta está suspendida. Contacta a soporte.", 403);
     }
 
-    // Login exitoso: se limpian los contadores de fallos
+    // La contraseña es correcta: se limpian los contadores de fallos.
     if (limitarPorIp) limpiarIntentosLogin(claveIp);
 
     if (usuario.intentosFallidosLogin > 0 || usuario.bloqueadoHasta) {
@@ -139,14 +144,67 @@ export async function POST(request: Request) {
       });
     }
 
+    // Cliente tradicional con correo que todavía no verifica su cuenta: no se crea
+    // sesión hasta completar el código. Aquí (y solo aquí, con la contraseña ya
+    // validada) se reutiliza el código vigente o se emite y envía uno nuevo.
+    // Las cuentas antiguas sin correo y las de Google no pasan por este bloque.
+    if (isPendingTraditionalAccount(usuario) && usuario.email) {
+      const issued = await issueEmailVerificationCode({
+        usuarioId: usuario.id,
+        correoDestino: usuario.email,
+        nombre: usuario.perfilCliente?.nombres || usuario.nombreUsuario,
+        mode: "login",
+      });
+
+      switch (issued.status) {
+        case "sent":
+        case "existing":
+          return Response.json(
+            {
+              success: false,
+              requiresEmailVerification: true,
+              codeStatus: issued.status,
+              cooldownSeconds: issued.cooldownSeconds,
+              expiresInSeconds: issued.expiresInSeconds,
+              email: usuario.email,
+              username: usuario.nombreUsuario,
+              message:
+                issued.status === "sent"
+                  ? "Te enviamos un código de 6 dígitos a tu correo para verificar tu cuenta."
+                  : "Tu cuenta aún no está verificada. Ingresa el código vigente que te enviamos.",
+            },
+            { status: 403 }
+          );
+
+        case "rate_limited":
+        case "cooldown":
+          return Response.json(
+            {
+              success: false,
+              message:
+                "Alcanzaste el límite de códigos de verificación. Intenta de nuevo más tarde.",
+              retryAfterSeconds: issued.retryAfterSeconds,
+            },
+            { status: 429 }
+          );
+
+        case "failed":
+          // El correo no salió: no se abre la pantalla del código. El usuario puede
+          // volver a iniciar sesión para reintentar (el código fallido ya se invalidó).
+          return fail(issued.userMessage, 503);
+      }
+    }
+
     await createSession(usuario.id);
 
     // Nunca se devuelve el hash ni los campos internos de seguridad.
     const {
       passwordHash: _hash,
       codigoVerificacion: _codigo,
+      codigoVerificacionExpiraEn: _codigoExpira,
       intentosFallidosLogin: _intentos,
       bloqueadoHasta: _bloqueo,
+      identidadesOAuth: _oauth,
       ...usuarioSeguro
     } = usuario;
 

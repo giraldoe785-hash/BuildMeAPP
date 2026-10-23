@@ -248,6 +248,8 @@ model Usuario {
   sesionUsuarios               SesionUsuario[]
   identidadesOAuth             IdentidadOAuth[]
   desafiosMfa                  DesafioMfa[]
+  verificacionesCorreo         VerificacionCorreo[]
+  tokensRecuperacionPassword   TokenRecuperacionPassword[]
 
   @@map("usuarios")
 }
@@ -340,6 +342,9 @@ model DocumentoReparador {
   estado             EstadoDocumento @default(PENDIENTE) // [MEJORA] antes era String libre
   fechaExpiracion    DateTime?
   observacionesAdmin String?
+  nombreOriginal     String?         @db.VarChar(255)
+  mimeType           String?         @db.VarChar(100)
+  tamanoBytes        Int?
   creadoEn           DateTime        @default(now())
 
   reparador PerfilReparador @relation("PerfilDocumentos", fields: [reparadorId], references: [id], onDelete: Cascade)
@@ -905,4 +910,48 @@ model DesafioMfa {
   @@index([usuarioId, consumidoEn])
   @@index([fechaExpira])
   @@map("desafios_mfa")
+}
+
+// ============================================================
+// 20. VERIFICACIÓN DE CORREO Y RECUPERACIÓN DE CONTRASEÑA
+// ============================================================
+
+model VerificacionCorreo {
+  id            String    @id @default(uuid()) @db.Uuid
+  usuarioId     String    @db.Uuid
+  correoDestino String    @db.VarChar(150)
+  codigoHash    String    @db.VarChar(64)
+  intentos      Int       @default(0)
+  maxIntentos   Int       @default(5)
+  reenvios      Int       @default(0)
+  ultimoEnvioEn DateTime  @default(now())
+  fechaExpira   DateTime
+  consumidoEn   DateTime?
+  invalidadoEn  DateTime?
+  creadoEn      DateTime  @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, consumidoEn, invalidadoEn])
+  @@index([correoDestino, creadoEn])
+  @@index([fechaExpira])
+  @@map("verificaciones_correo")
+}
+
+model TokenRecuperacionPassword {
+  id           String    @id @default(uuid()) @db.Uuid
+  usuarioId    String    @db.Uuid
+  tokenHash    String    @unique @db.VarChar(64)
+  ipSolicitud  String?   @db.VarChar(45)
+  userAgent    String?   @db.Text
+  fechaExpira  DateTime
+  consumidoEn  DateTime?
+  invalidadoEn DateTime?
+  creadoEn     DateTime  @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, consumidoEn, invalidadoEn])
+  @@index([fechaExpira])
+  @@map("tokens_recuperacion_password")
 }

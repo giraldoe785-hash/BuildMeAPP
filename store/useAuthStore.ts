@@ -38,17 +38,54 @@ interface ApiUser {
   estado: "PENDIENTE_VERIFICACION" | "EN_REVISION" | "VERIFICADO" | "RECHAZADO" | "SUSPENDIDO";
   creadoEn: string;
   perfilCliente?: { nombres: string; apellidos: string } | null;
-  perfilReparador?: { nombres: string; apellidos: string; numeroDocumento?: string } | null;
+  perfilReparador?: {
+    nombres: string;
+    apellidos: string;
+    numeroDocumento?: string;
+    especialidades?: { categoria?: { slug?: string } | null }[];
+    documentos?: {
+      nombreOriginal?: string | null;
+      mimeType?: string | null;
+      tamanoBytes?: number | null;
+    }[];
+  } | null;
+}
+
+const CATEGORY_IDS: ServiceCategoryId[] = [
+  "electricidad",
+  "plomeria",
+  "carpinteria",
+  "herreria",
+  "pintura",
+  "cerrajeria",
+];
+
+function formatFileSize(bytes: number): string {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function toAuthUser(api: ApiUser): AuthUser | null {
-  if (api.rol === "ADMINISTRADOR") return null; // esta app no tiene vista de administrador
-
   const perfil = api.rol === "REPARADOR" ? api.perfilReparador : api.perfilCliente;
   const fullName = perfil ? `${perfil.nombres} ${perfil.apellidos}`.trim() : "";
   const createdAt = (api.creadoEn ?? "").slice(0, 10);
 
+  if (api.rol === "ADMINISTRADOR") {
+    return {
+      id: api.id,
+      name: fullName || api.nombreUsuario,
+      username: api.nombreUsuario,
+      role: "admin",
+      createdAt,
+    };
+  }
+
   if (api.rol === "REPARADOR") {
+    const slug = api.perfilReparador?.especialidades?.[0]?.categoria?.slug;
+    const specialty = CATEGORY_IDS.find((id) => id === slug);
+    const doc = api.perfilReparador?.documentos?.[0];
+
     return {
       id: api.id,
       name: fullName || api.nombreUsuario,
@@ -58,8 +95,10 @@ function toAuthUser(api: ApiUser): AuthUser | null {
       verificationStatus:
         api.estado === "VERIFICADO" ? "approved" : api.estado === "RECHAZADO" ? "rejected" : "pending",
       createdAt,
-      // specialty, documentName, documentSize: llegarán cuando exista el
-      // endpoint de registro/consulta de reparadores.
+      specialty,
+      documentName: doc?.nombreOriginal ?? undefined,
+      documentType: doc?.mimeType ?? undefined,
+      documentSize: doc?.tamanoBytes != null ? formatFileSize(doc.tamanoBytes) : undefined,
     };
   }
 
@@ -76,19 +115,34 @@ function toAuthUser(api: ApiUser): AuthUser | null {
 // Llamadas al backend
 // ---------------------------------------------------------------------------
 
-export type AuthResult = { success: boolean; message?: string; user?: AuthUser };
+export type VerificationCodeStatus = "sent" | "existing";
+
+export type AuthResult = {
+  success: boolean;
+  message?: string;
+  user?: AuthUser;
+  requiresEmailVerification?: boolean;
+  /** "sent": se envió un código ahora. "existing": ya había uno vigente. */
+  codeStatus?: VerificationCodeStatus;
+  /** Segundos que faltan, según el servidor, para poder pedir otro código. */
+  cooldownSeconds?: number;
+  expiresInSeconds?: number;
+  email?: string;
+  username?: string;
+};
 
 const NETWORK_ERROR = "Error de conexión. Verifica tu conexión a internet e intenta de nuevo.";
 
 async function callApi(
   url: string,
-  options: { method: "GET" | "POST"; body?: unknown }
+  options: { method: "GET" | "POST"; body?: unknown; formData?: FormData }
 ): Promise<{ ok: boolean; status: number; data: any } | null> {
   try {
+    // Con FormData el navegador pone solo el Content-Type (con su "boundary").
     const res = await fetch(url, {
       method: options.method,
       headers: options.body ? { "Content-Type": "application/json" } : undefined,
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: options.formData ?? (options.body ? JSON.stringify(options.body) : undefined),
       cache: "no-store",
     });
     let data: any = null;
@@ -131,19 +185,41 @@ export interface AuthState {
   login: (username: string, password: string) => Promise<AuthResult>;
   registerClient: (data: {
     name: string;
+    email: string;
     username: string;
     password: string;
     confirmPassword: string;
   }) => Promise<AuthResult>;
+  verifyEmailCode: (data: {
+    username?: string;
+    email?: string;
+    code: string;
+  }) => Promise<AuthResult>;
+  resendVerificationCode: (data: {
+    username?: string;
+    email?: string;
+  }) => Promise<{
+    success: boolean;
+    message: string;
+    /** Espera real (segundos) hasta poder pedir otro código, devuelta por el servidor. */
+    cooldownSeconds?: number;
+    expiresInSeconds?: number;
+    /** En un 429, segundos que faltan para poder reintentar. */
+    retryAfterSeconds?: number;
+  }>;
+  requestPasswordReset: (
+    email: string
+  ) => Promise<{ success: boolean; message: string }>;
   registerRepairer: (data: {
     name: string;
     username: string;
     cedula: string;
+    city: string;
     password: string;
     confirmPassword: string;
     specialty: ServiceCategoryId;
-    documentFile?: { name: string; type: string; size: string };
-  }) => { success: boolean; message?: string; user?: AuthUser };
+    documentFile: File;
+  }) => Promise<AuthResult>;
   logout: () => Promise<void>;
 }
 
@@ -173,7 +249,21 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
     if (!res) return { success: false, message: NETWORK_ERROR };
     if (!res.ok) {
-      return { success: false, message: res.data?.message || "No fue posible iniciar sesión." };
+      const needsVerification = Boolean(res.data?.requiresEmailVerification);
+      return {
+        success: false,
+        message: res.data?.message || "No fue posible iniciar sesión.",
+        requiresEmailVerification: needsVerification,
+        codeStatus: res.data?.codeStatus === "sent" ? "sent" : "existing",
+        cooldownSeconds:
+          typeof res.data?.cooldownSeconds === "number" ? res.data.cooldownSeconds : 0,
+        expiresInSeconds:
+          typeof res.data?.expiresInSeconds === "number"
+            ? res.data.expiresInSeconds
+            : undefined,
+        email: res.data?.email,
+        username: res.data?.username || username.trim().toLowerCase(),
+      };
     }
 
     const user = toAuthUser(res.data.user as ApiUser);
@@ -187,15 +277,50 @@ export const useAuthStore = create<AuthState>()((set) => ({
     return { success: true, user };
   },
 
-  registerClient: async ({ name, username, password, confirmPassword }) => {
+  registerClient: async ({ name, email, username, password, confirmPassword }) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedUsername = username.trim().toLowerCase();
+
     const res = await callApi("/api/auth/register/client", {
       method: "POST",
-      body: { name: name.trim(), username: username.trim(), password, confirmPassword },
+      body: {
+        name: name.trim(),
+        email: normalizedEmail,
+        username: normalizedUsername,
+        password,
+        confirmPassword,
+      },
     });
 
     if (!res) return { success: false, message: NETWORK_ERROR };
+
+    // Error del servidor (400, 409, 429, 503...): se muestra el mensaje en el formulario
+    // y NO se abre la pantalla del código, porque no se envió ningún código.
     if (!res.ok) {
-      return { success: false, message: res.data?.message || "Error al crear la cuenta." };
+      return {
+        success: false,
+        message: res.data?.message || "Error al crear la cuenta.",
+      };
+    }
+
+    // 200/201 con código enviado (o vigente): se continúa en la pantalla del código.
+    if (res.data?.requiresEmailVerification) {
+      return {
+        success: true,
+        requiresEmailVerification: true,
+        codeStatus: res.data?.codeStatus === "existing" ? "existing" : "sent",
+        cooldownSeconds:
+          typeof res.data?.cooldownSeconds === "number" ? res.data.cooldownSeconds : 0,
+        expiresInSeconds:
+          typeof res.data?.expiresInSeconds === "number"
+            ? res.data.expiresInSeconds
+            : undefined,
+        email: res.data?.email || normalizedEmail,
+        username: res.data?.username || normalizedUsername,
+        message:
+          res.data?.message ||
+          "Ingresa el código de 6 dígitos enviado a tu correo electrónico.",
+      };
     }
 
     // La cuenta existe pero no se pudo abrir la sesión: debe iniciar sesión a mano
@@ -213,14 +338,151 @@ export const useAuthStore = create<AuthState>()((set) => ({
     return { success: true, user };
   },
 
-  // El backend de registro de reparadores todavía no existe (necesita decidir
-  // dónde guardar los documentos de acreditación). Misma firma que antes para
-  // que RegisterRepairerForm siga compilando.
-  registerRepairer: () => ({
-    success: false,
-    message:
-      "El registro de reparadores aún no está disponible. Por ahora puedes crear una cuenta de cliente.",
-  }),
+  verifyEmailCode: async ({ username, email, code }) => {
+    const res = await callApi("/api/auth/verify-email", {
+      method: "POST",
+      body: {
+        username: username?.trim().toLowerCase(),
+        email: email?.trim().toLowerCase(),
+        code: code.trim(),
+      },
+    });
+
+    if (!res) return { success: false, message: NETWORK_ERROR };
+    if (!res.ok) {
+      return {
+        success: false,
+        message: res.data?.message || "No fue posible verificar el código.",
+      };
+    }
+
+    if (res.data?.sesionIniciada === false) {
+      return {
+        success: true,
+        message:
+          res.data?.message ||
+          "Correo verificado correctamente. Ahora puedes iniciar sesión.",
+      };
+    }
+
+    const user = toAuthUser(res.data.user as ApiUser);
+    if (!user) {
+      return {
+        success: false,
+        message: "Error al cargar los datos de tu cuenta verificada.",
+      };
+    }
+
+    set({ currentUser: user, isAuthenticated: true });
+    return {
+      success: true,
+      user,
+      message: res.data?.message || "Correo verificado correctamente.",
+    };
+  },
+
+  resendVerificationCode: async ({ username, email }) => {
+    const res = await callApi("/api/auth/verify-email/resend", {
+      method: "POST",
+      body: {
+        username: username?.trim().toLowerCase(),
+        email: email?.trim().toLowerCase(),
+      },
+    });
+
+    if (!res) return { success: false, message: NETWORK_ERROR };
+    if (!res.ok) {
+      return {
+        success: false,
+        message: res.data?.message || "No fue posible reenviar el código.",
+        retryAfterSeconds:
+          typeof res.data?.retryAfterSeconds === "number"
+            ? res.data.retryAfterSeconds
+            : undefined,
+      };
+    }
+
+    return {
+      success: true,
+      message:
+        res.data?.message ||
+        "Hemos enviado un nuevo código de 6 dígitos a tu correo.",
+      cooldownSeconds:
+        typeof res.data?.cooldownSeconds === "number"
+          ? res.data.cooldownSeconds
+          : undefined,
+      expiresInSeconds:
+        typeof res.data?.expiresInSeconds === "number"
+          ? res.data.expiresInSeconds
+          : undefined,
+    };
+  },
+
+  requestPasswordReset: async (email) => {
+    const res = await callApi("/api/auth/password/forgot", {
+      method: "POST",
+      body: { email: email.trim().toLowerCase() },
+    });
+
+    if (!res) return { success: false, message: NETWORK_ERROR };
+    if (!res.ok) {
+      return {
+        success: false,
+        message:
+          res.data?.message ||
+          "No fue posible procesar la solicitud de recuperación.",
+      };
+    }
+
+    return {
+      success: true,
+      message:
+        res.data?.message ||
+        "Si existe una cuenta compatible con esa dirección, recibirás un enlace para recuperar tu contraseña.",
+    };
+  },
+
+  registerRepairer: async ({
+    name,
+    username,
+    cedula,
+    city,
+    password,
+    confirmPassword,
+    specialty,
+    documentFile,
+  }) => {
+    const formData = new FormData();
+    formData.append("name", name.trim());
+    formData.append("username", username.trim());
+    formData.append("cedula", cedula.trim());
+    formData.append("city", city.trim());
+    formData.append("specialty", specialty);
+    formData.append("password", password);
+    formData.append("confirmPassword", confirmPassword);
+    formData.append("document", documentFile);
+
+    const res = await callApi("/api/auth/register/repairer", { method: "POST", formData });
+
+    if (!res) return { success: false, message: NETWORK_ERROR };
+    if (!res.ok) {
+      return { success: false, message: res.data?.message || "Error al crear la cuenta de reparador." };
+    }
+
+    // La cuenta existe pero no se pudo abrir la sesión: debe iniciar sesión a mano
+    if (res.data?.sesionIniciada === false) {
+      return {
+        success: false,
+        message: res.data?.message || "Cuenta creada. Inicia sesión para continuar.",
+      };
+    }
+
+    const user = toAuthUser(res.data.user as ApiUser);
+    if (!user) return { success: false, message: "Error al crear la cuenta de reparador." };
+
+    set({ currentUser: user, isAuthenticated: true });
+    return { success: true, user };
+  },
 
   logout: async () => {
     // La interfaz se limpia al instante; luego se cierra la sesión en el servidor.

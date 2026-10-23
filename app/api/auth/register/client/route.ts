@@ -1,25 +1,25 @@
-import { createSession, hashPassword } from "@/lib/auth";
+import { hashPassword } from "@/lib/auth";
+import {
+  isPendingTraditionalAccount,
+  issueEmailVerificationCode,
+} from "@/lib/emailVerification";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rateLimit";
-
-const PASSWORD_MIN_LENGTH = 7;
-const PASSWORD_MAX_LENGTH = 128; // evita contraseñas gigantes (abuso de CPU/memoria)
-const USERNAME_REGEX = /^[a-z0-9_.]{3,50}$/; // 50 = límite que ya tenías
-const NAME_MAX_LENGTH = 100;
+import {
+  normalizeEmail,
+  normalizeUsername,
+  validateClientRegistration,
+} from "@/lib/registrationValidation";
 
 const registerLimiter = createRateLimiter({ max: 10, windowMs: 60 * 60 * 1000 });
+const emailTargetLimiter = createRateLimiter({ max: 5, windowMs: 30 * 60 * 1000 });
 
-const PASSWORD_ERROR =
-  "La contraseña debe tener mínimo 7 caracteres y contener al menos 2 números.";
-
-function fail(message: string, status = 400) {
-  return Response.json({ success: false, message }, { status });
-}
-
-function isValidPassword(password: string): boolean {
-  const numbersCount = (password.match(/\d/g) || []).length;
-
-  return password.length >= PASSWORD_MIN_LENGTH && numbersCount >= 2;
+function fail(
+  message: string,
+  status = 400,
+  extra?: Record<string, unknown>
+) {
+  return Response.json({ success: false, message, ...extra }, { status });
 }
 
 // Con 4 o más palabras se asume "nombre(s) + dos apellidos" (lo más común en
@@ -50,7 +50,6 @@ function getClientIp(request: Request): string {
 
 export async function POST(request: Request) {
   try {
-    // Un JSON roto o vacío es un error del cliente (400), no del servidor (500)
     let body: unknown;
     try {
       body = await request.json();
@@ -65,120 +64,173 @@ export async function POST(request: Request) {
     const data = body as Record<string, unknown>;
 
     const name = typeof data.name === "string" ? data.name.trim() : "";
+    const email = typeof data.email === "string" ? normalizeEmail(data.email) : "";
     const username =
-      typeof data.username === "string"
-        ? data.username.trim().toLowerCase()
-        : "";
+      typeof data.username === "string" ? normalizeUsername(data.username) : "";
     const password = typeof data.password === "string" ? data.password : "";
     const confirmPassword =
       typeof data.confirmPassword === "string" ? data.confirmPassword : "";
 
-    if (!name || !username || !password || !confirmPassword) {
-      return fail("Todos los campos son obligatorios.");
-    }
-
-    if (!USERNAME_REGEX.test(username)) {
-      return fail(
-        "El nombre de usuario debe tener entre 3 y 50 caracteres y solo puede contener letras, números, punto o guion bajo."
-      );
-    }
-
-    if (password.length > PASSWORD_MAX_LENGTH || !isValidPassword(password)) {
-      return fail(PASSWORD_ERROR);
-    }
-
-    if (password !== confirmPassword) {
-      return fail("Las contraseñas no coinciden.");
-    }
-
-    if (name.length > NAME_MAX_LENGTH) {
-      return fail(`El nombre no puede superar ${NAME_MAX_LENGTH} caracteres.`);
-    }
-
-    if (name.split(/\s+/).length < 2) {
-      return fail(
-        "Ingresa el nombre completo incluyendo al menos un apellido."
-      );
+    // Mismas reglas que aplica el formulario (lib/registrationValidation.ts).
+    const validationError = validateClientRegistration({
+      name,
+      email,
+      username,
+      password,
+      confirmPassword,
+    });
+    if (validationError) {
+      return fail(validationError);
     }
 
     const { nombres, apellidos } = splitFullName(name);
 
-    // Chequeo temprano: evita calcular el hash si el usuario ya existe.
-    // La carrera entre dos registros simultáneos se cubre con el P2002 de abajo.
-    const existingUser = await prisma.usuario.findUnique({
-      where: { nombreUsuario: username },
-      select: { id: true },
-    });
+    // Verificar si ya existen usuarios con ese username o correo
+    const [existingByUsername, existingByEmail] = await Promise.all([
+      prisma.usuario.findUnique({
+        where: { nombreUsuario: username },
+        select: { id: true },
+      }),
+      prisma.usuario.findUnique({
+        where: { email },
+        include: { identidadesOAuth: { select: { id: true } } },
+      }),
+    ]);
 
-    if (existingUser) {
+    // Solo una cuenta tradicional pendiente puede reutilizarse (reintentar el registro
+    // tras un envío fallido o con una contraseña nueva). Cualquier otra cuenta con ese
+    // correo —verificada, de Google, suspendida…— NUNCA se vincula ni se reemplaza.
+    let pendingAccountId: string | null = null;
+
+    if (existingByEmail) {
+      if (!isPendingTraditionalAccount(existingByEmail)) {
+        return fail(
+          "Ese correo electrónico ya está asociado a una cuenta. Inicia sesión con tu método original o usa otro correo.",
+          409
+        );
+      }
+
+      if (existingByUsername && existingByUsername.id !== existingByEmail.id) {
+        return fail("El nombre de usuario ya está registrado.", 409);
+      }
+
+      pendingAccountId = existingByEmail.id;
+    } else if (existingByUsername) {
       return fail("El nombre de usuario ya está registrado.", 409);
     }
 
-    // Límite de registros por IP: solo cuentan las solicitudes que ya pasaron
-    // toda la validación y llegan al hash. Sin await entre isLimited y record.
     const ip = getClientIp(request);
-    if (registerLimiter.isLimited(ip)) {
+    if (registerLimiter.isLimited(ip) || emailTargetLimiter.isLimited(email)) {
       return fail(
-        "Demasiados registros desde esta conexión. Intenta de nuevo más tarde.",
+        "Demasiadas solicitudes de registro. Intenta de nuevo más tarde.",
         429
       );
     }
     registerLimiter.record(ip);
+    emailTargetLimiter.record(email);
 
     const passwordHash = await hashPassword(password);
 
-    // El create con relación anidada ya es atómico: no hace falta $transaction.
-    const usuario = await prisma.usuario.create({
-      data: {
-        nombreUsuario: username,
-        passwordHash,
-        rol: "CLIENTE",
-        estado: "PENDIENTE_VERIFICACION",
-        perfilCliente: {
-          create: { nombres, apellidos },
-        },
-      },
-      include: { perfilCliente: true },
+    // Crea la cuenta pendiente o actualiza la existente. Aquí NO se abre sesión.
+    // Actualizar la contraseña en cada reintento también evita que alguien que
+    // registró antes ese correo conserve la contraseña de la cuenta pendiente.
+    const usuario = pendingAccountId
+      ? await prisma.usuario.update({
+          where: { id: pendingAccountId },
+          data: {
+            nombreUsuario: username,
+            passwordHash,
+            perfilCliente: {
+              upsert: {
+                create: { nombres, apellidos },
+                update: { nombres, apellidos },
+              },
+            },
+          },
+          select: { id: true },
+        })
+      : await prisma.usuario.create({
+          data: {
+            email,
+            nombreUsuario: username,
+            passwordHash,
+            rol: "CLIENTE",
+            estado: "PENDIENTE_VERIFICACION",
+            perfilCliente: { create: { nombres, apellidos } },
+          },
+          select: { id: true },
+        });
+
+    const issued = await issueEmailVerificationCode({
+      usuarioId: usuario.id,
+      correoDestino: email,
+      nombre: nombres,
+      mode: "register",
     });
 
-    // Si la sesión falla, la cuenta YA existe: no devolvemos 500, porque el
-    // usuario reintentaría y recibiría "usuario ya registrado".
-    let sesionIniciada = true;
-    try {
-      await createSession(usuario.id);
-    } catch (sessionError) {
-      sesionIniciada = false;
-      console.error("Cuenta creada pero falló la sesión:", sessionError);
+    switch (issued.status) {
+      case "sent":
+        return Response.json(
+          {
+            success: true,
+            requiresEmailVerification: true,
+            sesionIniciada: false,
+            codeStatus: "sent",
+            cooldownSeconds: issued.cooldownSeconds,
+            expiresInSeconds: issued.expiresInSeconds,
+            email,
+            username,
+            message:
+              "Te enviamos un código de verificación de 6 dígitos a tu correo electrónico.",
+          },
+          { status: 201 }
+        );
+
+      case "existing":
+        return Response.json(
+          {
+            success: true,
+            requiresEmailVerification: true,
+            sesionIniciada: false,
+            codeStatus: "existing",
+            cooldownSeconds: issued.cooldownSeconds,
+            expiresInSeconds: issued.expiresInSeconds,
+            email,
+            username,
+            message:
+              "Ya te enviamos un código hace un momento. Revisa tu correo e ingrésalo para continuar.",
+          },
+          { status: 200 }
+        );
+
+      case "rate_limited":
+      case "cooldown": {
+        return fail(
+          "Alcanzaste el límite de códigos para esta cuenta. Intenta de nuevo más tarde.",
+          429,
+          { retryAfterSeconds: issued.retryAfterSeconds }
+        );
+      }
+
+      case "failed":
+        // El correo NO salió: no se abre la pantalla del código ni se afirma que se envió.
+        // La cuenta queda pendiente y se puede reintentar con el mismo formulario.
+        return fail(issued.userMessage, 503);
     }
-
-    // Nunca se devuelve el hash ni los campos internos de seguridad.
-    const {
-      passwordHash: _hash,
-      codigoVerificacion: _codigo,
-      codigoVerificacionExpiraEn: _codigoExpira,
-      intentosFallidosLogin: _intentos,
-      bloqueadoHasta: _bloqueo,
-      ...usuarioSeguro
-    } = usuario;
-
-    return Response.json(
-      {
-        success: true,
-        message: sesionIniciada
-          ? "Cuenta de cliente creada correctamente."
-          : "Cuenta creada. Inicia sesión para continuar.",
-        sesionIniciada,
-        user: usuarioSeguro,
-      },
-      { status: 201 }
-    );
   } catch (error) {
-    console.error("Error al registrar cliente:", error);
+    console.error(
+      `[Register] Error al registrar cliente | tipo=${
+        error instanceof Error ? error.name : "desconocido"
+      } | codigo=${(error as { code?: string }).code ?? "n/d"}`
+    );
 
     if ((error as { code?: string }).code === "P2002") {
-      return fail("El nombre de usuario ya está registrado.", 409);
+      return fail(
+        "El nombre de usuario o el correo electrónico ya están registrados.",
+        409
+      );
     }
 
-    return fail("No fue posible crear la cuenta.", 500);
+    return fail("No fue posible procesar el registro.", 500);
   }
 }

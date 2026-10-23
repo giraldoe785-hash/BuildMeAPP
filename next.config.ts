@@ -29,6 +29,20 @@ const nextConfig: NextConfig = {
           { key: "Permissions-Policy", value: "geolocation=(self)" },
         ],
       },
+      {
+        source: "/reset-password",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate" },
+        ],
+      },
+      {
+        source: "/api/auth/password/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate" },
+        ],
+      },
     ];
   },
 };

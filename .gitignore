@@ -11,3 +11,4 @@ tsconfig.tsbuildinfo
 .claude/
 .windsurf/
 skills-lock.json
+storage/

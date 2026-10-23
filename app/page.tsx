@@ -12,6 +12,7 @@ import { OrdersView } from "@/components/orders/OrdersView";
 import { ProfileView } from "@/components/profile/ProfileView";
 import { AuthScreen } from "@/components/auth/AuthScreen";
 import { RepairerDashboard } from "@/components/repairer/RepairerDashboard";
+import { AdminSupportDashboard } from "@/components/admin/AdminSupportDashboard";
 import { LocationModal } from "@/components/home/LocationModal";
 import { EmergencyModal } from "@/components/home/EmergencyModal";
 import { AnimatePresence, motion } from "framer-motion";
@@ -43,6 +44,17 @@ export default function App() {
     return (
       <DeviceFrame>
         <AuthScreen />
+      </DeviceFrame>
+    );
+  }
+
+  // Si el usuario tiene rol de ADMINISTRADOR -> Mostrar Consola de Soporte y Mediación (HU22 / HU23)
+  if (currentUser.role === "admin") {
+    return (
+      <DeviceFrame>
+        <main className="relative flex-1 flex flex-col min-h-full">
+          <AdminSupportDashboard />
+        </main>
       </DeviceFrame>
     );
   }
