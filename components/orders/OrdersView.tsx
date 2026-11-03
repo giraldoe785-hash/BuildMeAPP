@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { useFixiStore } from "@/store/useFixiStore";
-import { Clock, ShieldCheck, CheckCircle2, ChevronRight, ArrowRight, Wrench, Receipt, HelpCircle } from "lucide-react";
+import { formatCatalogUnitsToCop } from "@/lib/pricing";
+import { ShieldCheck, ArrowRight, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { UserSupportModal } from "@/components/support/UserSupportModal";
 
@@ -68,11 +69,32 @@ export const OrdersView: React.FC = () => {
           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
             Servicio Activo
           </span>
-          <div className="p-4 bg-white rounded-3xl border-2 border-emerald-500 shadow-md space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full uppercase">
-                {activeOrder.status}
-              </span>
+          <div
+            className={`p-4 bg-white rounded-3xl border-2 shadow-md space-y-3 ${
+              activeOrder.paymentStatus === "CAPTURADO"
+                ? "border-emerald-500"
+                : activeOrder.paymentStatus === "FALLIDO"
+                ? "border-rose-400"
+                : "border-amber-400"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full uppercase">
+                  {activeOrder.status}
+                </span>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                    activeOrder.paymentStatus === "CAPTURADO"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : activeOrder.paymentStatus === "FALLIDO"
+                      ? "bg-rose-50 text-rose-700 border border-rose-200"
+                      : "bg-amber-50 text-amber-800 border border-amber-200"
+                  }`}
+                >
+                  Pago: {activeOrder.paymentStatus}
+                </span>
+              </div>
               <span className="text-xs font-mono font-bold text-slate-700">
                 #{activeOrder.id}
               </span>
@@ -83,13 +105,15 @@ export const OrdersView: React.FC = () => {
                 {activeOrder.diagnosis.title}
               </h4>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Especialista: {activeOrder.technician.name}
+                {activeOrder.paymentStatus === "CAPTURADO"
+                  ? `Especialista: ${activeOrder.technician.name}`
+                  : "Asignación pendiente de confirmación de pago en Wompi"}
               </p>
             </div>
 
             <div className="flex items-center justify-between pt-2 border-t border-slate-100">
               <span className="text-xs font-black text-emerald-700">
-                ${activeOrder.pricing.total.toFixed(2)} USD
+                {formatCatalogUnitsToCop(activeOrder.pricing.total.toFixed(2))}
               </span>
 
               <div className="flex items-center gap-1.5">
@@ -106,7 +130,11 @@ export const OrdersView: React.FC = () => {
                   className="flex items-center gap-1"
                   onClick={() => setActiveTab("tracking")}
                 >
-                  <span>Ver en Vivo</span>
+                  <span>
+                    {activeOrder.paymentStatus === "CAPTURADO"
+                      ? "Ver en Vivo"
+                      : "Completar Pago"}
+                  </span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Button>
               </div>
@@ -154,7 +182,7 @@ export const OrdersView: React.FC = () => {
                     Solicitar soporte
                   </button>
                   <span className="font-extrabold text-slate-900">
-                    ${order.total.toFixed(2)} USD
+                    {formatCatalogUnitsToCop(order.total.toFixed(2))}
                   </span>
                 </div>
               </div>

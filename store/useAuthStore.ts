@@ -239,6 +239,10 @@ export const useAuthStore = create<AuthState>()((set) => ({
       isAuthenticated: user !== null,
       isCheckingSession: false,
     });
+
+    if (user?.role === "client") {
+      void useFixiStore.getState().fetchActiveOrder().catch(() => {});
+    }
   },
 
   login: async (username, password) => {
@@ -274,6 +278,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
     }
 
     set({ currentUser: user, isAuthenticated: true });
+    if (user.role === "client") {
+      void useFixiStore.getState().fetchActiveOrder().catch(() => {});
+    }
     return { success: true, user };
   },
 

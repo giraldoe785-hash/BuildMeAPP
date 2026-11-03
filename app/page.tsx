@@ -4,6 +4,8 @@ import React, { useEffect, useState } from "react";
 import { useFixiStore } from "@/store/useFixiStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { DeviceFrame } from "@/components/layout/DeviceFrame";
+import { MobileAppShell } from "@/components/layout/MobileAppShell";
+import { AdminDesktopLayout } from "@/components/layout/AdminDesktopLayout";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { HomeView } from "@/components/home/HomeView";
 import { WizardContainer } from "@/components/wizard/WizardContainer";
@@ -51,28 +53,26 @@ export default function App() {
   // Si el usuario tiene rol de ADMINISTRADOR -> Mostrar Consola de Soporte y Mediación (HU22 / HU23)
   if (currentUser.role === "admin") {
     return (
-      <DeviceFrame>
-        <main className="relative flex-1 flex flex-col min-h-full">
-          <AdminSupportDashboard />
-        </main>
-      </DeviceFrame>
+      <AdminDesktopLayout>
+        <AdminSupportDashboard />
+      </AdminDesktopLayout>
     );
   }
 
   // Si el usuario tiene rol de REPARADOR -> Mostrar Dashboard del Reparador
   if (currentUser.role === "repairer") {
     return (
-      <DeviceFrame>
+      <MobileAppShell>
         <main className="relative flex-1 flex flex-col min-h-full">
           <RepairerDashboard />
         </main>
-      </DeviceFrame>
+      </MobileAppShell>
     );
   }
 
   // Si el usuario tiene rol de CLIENTE -> Mostrar Flujo de Cliente
   return (
-    <DeviceFrame>
+    <MobileAppShell>
       <main className="relative flex-1 flex flex-col min-h-full">
         <AnimatePresence mode="wait">
           {activeTab === "home" && (
@@ -148,6 +148,6 @@ export default function App() {
         {/* Floating Bottom Navigation Bar (Oculta sólo dentro del Wizard para foco de checkout) */}
         {activeTab !== "wizard" && <BottomNav />}
       </main>
-    </DeviceFrame>
+    </MobileAppShell>
   );
 }

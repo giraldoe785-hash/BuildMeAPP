@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback } from "react";
 import { useFixiStore } from "@/store/useFixiStore";
 import { AI_DIAGNOSIS_PRESETS } from "@/data/aiPresets";
+import { formatCanonicalCopPesos, formatCatalogUnitsToCop } from "@/lib/pricing";
 import {
   Sparkles,
   Camera,
@@ -382,9 +383,11 @@ export const StepAiScan: React.FC = () => {
                         </strong>
                       </span>
                       <span className="text-emerald-700 font-bold">
-                        {preset.pricingType === "guaranteed_fixed"
-                          ? `$${preset.priceFixed?.toFixed(2)}`
-                          : `$${preset.priceRangeMin}-$${preset.priceRangeMax}`}
+                        {preset.budget
+                          ? formatCanonicalCopPesos(preset.budget.laborEstimateCop)
+                          : preset.pricingType === "guaranteed_fixed"
+                          ? formatCatalogUnitsToCop(preset.priceFixed?.toFixed(2))
+                          : `${formatCatalogUnitsToCop(preset.priceRangeMin?.toFixed(2))} - ${formatCatalogUnitsToCop(preset.priceRangeMax?.toFixed(2))}`}
                       </span>
                     </div>
                   </button>
@@ -626,27 +629,73 @@ export const StepAiScan: React.FC = () => {
           </div>
 
           {/* Price Callout Banner */}
-          <div className="p-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-2xl flex items-center justify-between shadow-md">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-200 block">
-                {currentDiagnosis.pricingType === "guaranteed_fixed"
-                  ? "Estimado de Mano de Obra (Precio Fijo)"
-                  : "Rango Estimado (+ Inspección)"}
-              </span>
-              <p className="text-lg font-black tracking-tight text-white">
-                {currentDiagnosis.pricingType === "guaranteed_fixed"
-                  ? `$${currentDiagnosis.priceFixed?.toFixed(2)} USD`
-                  : `$${currentDiagnosis.priceRangeMin?.toFixed(2)} - $${currentDiagnosis.priceRangeMax?.toFixed(2)} USD`}
-              </p>
+          <div className="p-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-2xl space-y-2.5 shadow-md">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-200 block">
+                  {currentDiagnosis.isIndicative || currentDiagnosis.pricingType === "estimated_range"
+                    ? "Estimación Orientativa (Mano de Obra)"
+                    : "Mano de Obra Estimada (Precio Fijo)"}
+                </span>
+                <p className="text-lg font-black tracking-tight text-white">
+                  {currentDiagnosis.budget
+                    ? formatCanonicalCopPesos(currentDiagnosis.budget.laborEstimateCop)
+                    : currentDiagnosis.pricingType === "guaranteed_fixed"
+                    ? (currentDiagnosis.priceFixed && currentDiagnosis.priceFixed >= 1000
+                        ? formatCanonicalCopPesos(currentDiagnosis.priceFixed)
+                        : formatCatalogUnitsToCop(currentDiagnosis.priceFixed?.toFixed(2)))
+                    : (currentDiagnosis.priceRangeMin && currentDiagnosis.priceRangeMin >= 1000
+                        ? `${formatCanonicalCopPesos(currentDiagnosis.priceRangeMin)} - ${formatCanonicalCopPesos(currentDiagnosis.priceRangeMax ?? currentDiagnosis.priceRangeMin)}`
+                        : `${formatCatalogUnitsToCop(currentDiagnosis.priceRangeMin?.toFixed(2))} - ${formatCatalogUnitsToCop(currentDiagnosis.priceRangeMax?.toFixed(2))}`)}
+                </p>
+              </div>
+
+              <div className="text-right">
+                <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-bold">
+                  {currentDiagnosis.isIndicative || currentDiagnosis.pricingType === "estimated_range"
+                    ? "Sujeto a sitio"
+                    : "Sin sorpresas"}
+                </span>
+              </div>
             </div>
 
-            <div className="text-right">
-              <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-bold">
-                {currentDiagnosis.pricingType === "guaranteed_fixed"
-                  ? "Sin sorpresas"
-                  : "Sujeto a sitio"}
-              </span>
-            </div>
+            {/* Presupuesto Desglosado si está disponible */}
+            {currentDiagnosis.budget && (
+              <div className="pt-2 border-t border-emerald-500/50 space-y-1 text-[11px] text-emerald-100">
+                <div className="flex justify-between">
+                  <span>Inspección técnica:</span>
+                  <span className="font-semibold text-white">{formatCanonicalCopPesos(currentDiagnosis.budget.inspectionAmountCop)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Mano de obra estimada:</span>
+                  <span className="font-semibold text-white">{formatCanonicalCopPesos(currentDiagnosis.budget.laborEstimateCop)}</span>
+                </div>
+                {currentDiagnosis.budget.materialsEstimateCop > 0 && (
+                  <div className="flex justify-between">
+                    <span>Materiales estimados:</span>
+                    <span className="font-semibold text-white">{formatCanonicalCopPesos(currentDiagnosis.budget.materialsEstimateCop)}</span>
+                  </div>
+                )}
+                {currentDiagnosis.budget.discountAmountCop > 0 && (
+                  <div className="flex justify-between text-emerald-200">
+                    <span>Descuento:</span>
+                    <span className="font-semibold text-emerald-200">-{formatCanonicalCopPesos(currentDiagnosis.budget.discountAmountCop)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-1 border-t border-emerald-500/30 font-bold text-white text-xs">
+                  <span>Presupuesto total estimado:</span>
+                  <span>{formatCanonicalCopPesos(currentDiagnosis.budget.totalEstimateCop)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Leyenda obligatoria de estimación orientativa según regla 5 */}
+            {(currentDiagnosis.isIndicative || currentDiagnosis.pricingType === "estimated_range" || currentDiagnosis.method === "Análisis_IA") && (
+              <div className="pt-1.5 border-t border-emerald-500/40 flex items-center gap-1.5 text-[10px] text-emerald-100 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 text-emerald-200" />
+                <span>Estimación orientativa, sujeta a confirmación del profesional.</span>
+              </div>
+            )}
           </div>
         </div>
       )}

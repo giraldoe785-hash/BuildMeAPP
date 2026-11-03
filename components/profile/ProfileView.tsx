@@ -1,10 +1,42 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useFixiStore } from "@/store/useFixiStore";
 import { useAuthStore } from "@/store/useAuthStore";
-import { User, ShieldCheck, CreditCard, MapPin, Bell, Globe, Smartphone, HelpCircle, LogOut, CheckCircle2, Wifi } from "lucide-react";
+import {
+  User,
+  ShieldCheck,
+  CreditCard,
+  MapPin,
+  Bell,
+  Globe,
+  Smartphone,
+  HelpCircle,
+  LogOut,
+  CheckCircle2,
+  Wifi,
+  Wallet,
+  PlusCircle,
+  History,
+  AlertTriangle,
+  RefreshCw,
+} from "lucide-react";
 import { UserSupportModal } from "@/components/support/UserSupportModal";
+import { TopUpModal } from "@/components/wallet/TopUpModal";
+import {
+  WalletHistoryList,
+  WalletMovementItem,
+} from "@/components/wallet/WalletHistoryList";
+
+interface WalletState {
+  id: string;
+  usuarioId: string;
+  saldoDisponibleCentavos: string;
+  saldoRetenidoCentavos: string;
+  formattedSaldoCop: string;
+  bloqueadaParaDebito: boolean;
+  requiereReconciliacion: boolean;
+}
 
 export const ProfileView: React.FC = () => {
   const {
@@ -18,6 +50,38 @@ export const ProfileView: React.FC = () => {
 
   const { currentUser, logout } = useAuthStore();
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isTopUpOpen, setIsTopUpOpen] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const [wallet, setWallet] = useState<WalletState | null>(null);
+  const [movimientos, setMovimientos] = useState<WalletMovementItem[]>([]);
+  const [isWalletLoading, setIsWalletLoading] = useState(false);
+
+  const fetchWallet = useCallback(async () => {
+    setIsWalletLoading(true);
+    try {
+      const res = await fetch("/api/wallet", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.wallet) {
+          setWallet(data.wallet);
+          setMovimientos(data.movimientos || []);
+        }
+      }
+    } catch (err) {
+      console.error("[ProfileView] Error fetching wallet:", err);
+    } finally {
+      setIsWalletLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWallet();
+  }, [fetchWallet]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col p-4 pb-28 space-y-4">
@@ -43,20 +107,77 @@ export const ProfileView: React.FC = () => {
       </div>
 
       {/* Fixi Wallet & Protection Balance */}
-      <div className="p-4 bg-gradient-to-r from-slate-900 to-emerald-950 text-white rounded-3xl border border-emerald-500/30 shadow-lg space-y-2">
+      <div className="p-4 bg-gradient-to-r from-slate-900 to-emerald-950 text-white rounded-3xl border border-emerald-500/30 shadow-lg space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider font-mono text-emerald-300">
-            Fixi Wallet & Cashback
-          </span>
-          <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-400/30">
-            Activo
-          </span>
+          <div className="flex items-center gap-1.5">
+            <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="text-[10px] uppercase tracking-wider font-mono text-emerald-300">
+              Fixi Wallet • Saldo Digital
+            </span>
+          </div>
+          {wallet?.bloqueadaParaDebito ? (
+            <span className="bg-rose-500/20 text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-rose-400/30">
+              Bloqueada
+            </span>
+          ) : wallet?.requiereReconciliacion ? (
+            <span className="bg-amber-500/20 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-400/30">
+              Reconciliación
+            </span>
+          ) : (
+            <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-400/30">
+              Activo
+            </span>
+          )}
         </div>
-        <p className="text-2xl font-black text-white">$120.00 USD</p>
-        <p className="text-[11px] text-slate-300">
-          Saldo disponible aplicable a cualquier cotización con IA.
-        </p>
+
+        <div>
+          <p className="text-2xl font-black text-white font-mono tracking-tight">
+            {wallet ? wallet.formattedSaldoCop : isWalletLoading ? "Cargando..." : "$ 0 COP"}
+          </p>
+          <p className="text-[11px] text-slate-300 mt-0.5">
+            Saldo disponible en Pesos Colombianos para pagar servicios al instante sin comisiones.
+          </p>
+        </div>
+
+        {/* Wallet Warnings */}
+        {wallet?.bloqueadaParaDebito && (
+          <div className="p-2.5 rounded-2xl bg-rose-950/60 border border-rose-500/40 flex items-start gap-2 text-[11px] text-rose-200">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+            <span>
+              Tu billetera está en revisión por seguridad. Los pagos con saldo están suspendidos temporalmente.
+            </span>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex gap-2 pt-1 border-t border-white/10">
+          <button
+            type="button"
+            onClick={() => setIsTopUpOpen(true)}
+            className="flex-1 py-2 px-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span>Recargar Saldo</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowHistory(!showHistory)}
+            className="py-2 px-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors border border-white/10"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>{showHistory ? "Ocultar" : "Movimientos"}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Movement History Section (Collapsible / Toggleable) */}
+      {showHistory && (
+        <WalletHistoryList
+          movimientos={movimientos}
+          isLoading={isWalletLoading}
+          onRefresh={fetchWallet}
+        />
+      )}
 
       {/* App & PWA Settings */}
       <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs divide-y divide-slate-100 overflow-hidden">
@@ -88,11 +209,13 @@ export const ProfileView: React.FC = () => {
               <CreditCard className="w-4 h-4" />
             </div>
             <div>
-              <p className="text-xs font-bold text-slate-900">Métodos de Pago</p>
-              <p className="text-[11px] text-slate-500">Visa terminada en •••• 8821</p>
+              <p className="text-xs font-bold text-slate-900">Pasarela de Pagos</p>
+              <p className="text-[11px] text-slate-500">Wompi Colombia Sandbox • Cifrado SHA-256</p>
             </div>
           </div>
-          <span className="text-xs font-bold text-slate-400">Administrar</span>
+          <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+            Conectado
+          </span>
         </div>
 
         {/* Centro de Ayuda y Soporte (HU21 / HU23) */}
@@ -165,6 +288,13 @@ export const ProfileView: React.FC = () => {
       <UserSupportModal
         isOpen={isSupportOpen}
         onClose={() => setIsSupportOpen(false)}
+      />
+
+      <TopUpModal
+        isOpen={isTopUpOpen}
+        onClose={() => setIsTopUpOpen(false)}
+        currentBalanceCop={wallet?.formattedSaldoCop}
+        onSuccess={fetchWallet}
       />
     </div>
   );

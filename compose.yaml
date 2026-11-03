@@ -1,0 +1,157 @@
+# ==============================================================================
+# BuildMeAPP - Local Docker Compose Infrastructure (R3)
+# ==============================================================================
+# Servicios:
+#   - db: PostgreSQL 18 para pruebas locales aisladas (buildmeapp_orders_test)
+#   - app: Aplicación Next.js 15 compilada en modo standalone
+#   - migrator: CLI de Prisma para ejecutar migraciones manuales (perfil: migration)
+# ==============================================================================
+
+name: buildmeapp
+
+services:
+  # ----------------------------------------------------------------------------
+  # Servicio PostgreSQL 18 (Pruebas locales independientes)
+  # ----------------------------------------------------------------------------
+  db:
+    image: postgres:18.6-bookworm
+    container_name: buildmeapp_postgres
+    restart: unless-stopped
+    environment:
+      # Usuario administrativo fijo para inicialización de la instancia
+      POSTGRES_USER: buildmeapp_test_admin
+      # Contraseña administrativa obligatoria (sin valor por defecto)
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Error: POSTGRES_PASSWORD es obligatoria. Genérela con openssl rand -hex 32 y defínala en .env.docker}"
+      # Base administrativa fija oficial
+      POSTGRES_DB: postgres
+      # Parámetros fijos para el aprovisionamiento de las bases de aplicación
+      APP_DB_USER: buildmeapp_test_user
+      # Contraseña de la base de aplicación obligatoria (sin valor por defecto)
+      APP_DB_PASSWORD: "${APP_DB_PASSWORD:?Error: APP_DB_PASSWORD es obligatoria. Genérela con openssl rand -hex 32 y defínala en .env.docker}"
+      APP_DB_NAME: buildmeapp_orders_test
+      APP_SHADOW_DB_NAME: buildmeapp_orders_shadow_test
+    ports:
+      # Expuesto exclusivamente en 127.0.0.1 en puerto no estándar 5433
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # Punto de montaje oficial de PostgreSQL 18 (/var/lib/postgresql)
+      - postgres_data:/var/lib/postgresql
+      - ./docker/init/01-create-test-databases.sh:/docker-entrypoint-initdb.d/01-create-test-databases.sh:ro
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U buildmeapp_test_admin -d postgres"
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend_net
+
+  # ----------------------------------------------------------------------------
+  # Servicio BuildMeAPP (Next.js Standalone Runtime)
+  # ----------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        NEXT_PUBLIC_SHOW_DEMO_LOGIN: ${NEXT_PUBLIC_SHOW_DEMO_LOGIN:-false}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID:-}
+        NEXT_PUBLIC_WOMPI_PUBLIC_KEY: ${NEXT_PUBLIC_WOMPI_PUBLIC_KEY:-}
+    container_name: buildmeapp_app
+    restart: unless-stopped
+    ports:
+      # Expuesto exclusivamente en 127.0.0.1 en puerto 3000
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      # Cadenas de conexión derivadas automáticamente de forma controlada
+      DATABASE_URL: "postgresql://buildmeapp_test_user:${APP_DB_PASSWORD:?Error: APP_DB_PASSWORD es obligatoria}@db:5432/buildmeapp_orders_test?schema=public"
+      SHADOW_DATABASE_URL: "postgresql://buildmeapp_test_user:${APP_DB_PASSWORD:?Error: APP_DB_PASSWORD es obligatoria}@db:5432/buildmeapp_orders_shadow_test?schema=public"
+      # Autenticación y sesiones (obligatorio sin valor por defecto)
+      AUTH_SECRET: "${AUTH_SECRET:?Error: AUTH_SECRET es obligatoria. Genérela con openssl rand -hex 32 y defínala en .env.docker}"
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      # Proveedores OAuth (opcionales)
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID:-}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET:-}
+      AUTH_MICROSOFT_ENTRA_ID_ID: ${AUTH_MICROSOFT_ENTRA_ID_ID:-}
+      AUTH_MICROSOFT_ENTRA_ID_SECRET: ${AUTH_MICROSOFT_ENTRA_ID_SECRET:-}
+      AUTH_MICROSOFT_ENTRA_ID_ISSUER: ${AUTH_MICROSOFT_ENTRA_ID_ISSUER:-https://login.microsoftonline.com/common/v2.0}
+      # Servicios de IA y correo (opcionales)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-20}
+      EMAIL_USER: ${EMAIL_USER:-}
+      EMAIL_PASS: ${EMAIL_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      # Variables públicas del frontend
+      NEXT_PUBLIC_SHOW_DEMO_LOGIN: ${NEXT_PUBLIC_SHOW_DEMO_LOGIN:-false}
+      NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+      NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID:-}
+      NEXT_PUBLIC_WOMPI_PUBLIC_KEY: ${NEXT_PUBLIC_WOMPI_PUBLIC_KEY:-}
+      # Pasarela de pagos Wompi (Sandbox local)
+      WOMPI_PRIVATE_KEY: ${WOMPI_PRIVATE_KEY:-}
+      WOMPI_EVENTS_SECRET: ${WOMPI_EVENTS_SECRET:-}
+      WOMPI_INTEGRITY_SECRET: ${WOMPI_INTEGRITY_SECRET:-}
+      WOMPI_API_URL: ${WOMPI_API_URL:-https://sandbox.wompi.co/v1}
+      WOMPI_API_BASE_URL: ${WOMPI_API_BASE_URL:-https://sandbox.wompi.co/v1}
+      WOMPI_ENVIRONMENT: ${WOMPI_ENVIRONMENT:-sandbox}
+      # Administración y CLI de inicialización de usuarios
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_PROMOTE_EXISTING: ${ADMIN_PROMOTE_EXISTING:-false}
+      # Almacenamiento persistente
+      STORAGE_DIR: /app/storage
+    volumes:
+      # Almacenamiento persistente de archivos independiente
+      - app_storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend_net
+
+  # ----------------------------------------------------------------------------
+  # Servicio de Migraciones Prisma (Perfil: migration - Ejecución explícita)
+  # ----------------------------------------------------------------------------
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+    container_name: buildmeapp_migrator
+    profiles:
+      - migration
+    environment:
+      # Conexión exclusiva con usuario de aplicación limitado a las bases de prueba
+      DATABASE_URL: "postgresql://buildmeapp_test_user:${APP_DB_PASSWORD:?Error: APP_DB_PASSWORD es obligatoria}@db:5432/buildmeapp_orders_test?schema=public"
+      SHADOW_DATABASE_URL: "postgresql://buildmeapp_test_user:${APP_DB_PASSWORD:?Error: APP_DB_PASSWORD es obligatoria}@db:5432/buildmeapp_orders_shadow_test?schema=public"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend_net
+
+# ------------------------------------------------------------------------------
+# Volúmenes Persistentes Nombrados (Independientes entre sí)
+# ------------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    name: buildmeapp_postgres_data
+  app_storage:
+    name: buildmeapp_app_storage
+
+# ------------------------------------------------------------------------------
+# Red Interna Aislada
+# ------------------------------------------------------------------------------
+networks:
+  backend_net:
+    name: buildmeapp_network
+    driver: bridge

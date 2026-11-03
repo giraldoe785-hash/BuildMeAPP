@@ -101,10 +101,19 @@ export async function verifySmtpConnection(): Promise<
   }
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
 /**
  * Obtiene y valida la URL base pública y confiable de BuildMeAPP.
  * Nunca utiliza cabeceras Host / X-Forwarded-Host / Origin de la petición entrante.
- * En producción exige explícitamente APP_BASE_URL con esquema HTTPS.
+ * En producción exige explícitamente APP_BASE_URL con esquema HTTPS (salvo entornos locales en localhost/127.0.0.1).
  * En desarrollo local admite http://localhost:3000 como valor por defecto si APP_BASE_URL no está definida.
  */
 export function getTrustedAppBaseUrl(): string | null {
@@ -118,16 +127,32 @@ export function getTrustedAppBaseUrl(): string | null {
 
   try {
     const parsed = new URL(candidate);
-    if (isProd && parsed.protocol !== "https:") {
-      console.error(
-        "[EmailConfig] APP_BASE_URL debe utilizar el protocolo HTTPS en producción."
-      );
-      return null;
+    const isLocal = isLoopbackHostname(parsed.hostname);
+
+    if (isProd) {
+      if (isLocal) {
+        console.error(
+          "[EmailConfig] APP_BASE_URL no puede apuntar a localhost ni direcciones de bucle invertido en producción."
+        );
+        return null;
+      }
+      if (parsed.protocol !== "https:") {
+        console.error(
+          "[EmailConfig] APP_BASE_URL debe utilizar el protocolo HTTPS en producción."
+        );
+        return null;
+      }
     }
 
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
       console.error("[EmailConfig] APP_BASE_URL tiene un protocolo inválido.");
       return null;
+    }
+
+    // Si estamos en entorno local y el servidor corre en un puerto diferente vía variable PORT,
+    // reflejar el puerto activo si la URL base fue configurada con el puerto por defecto (3000) o sin puerto.
+    if (isLocal && process.env.PORT && (!parsed.port || parsed.port === "3000") && process.env.PORT !== "3000") {
+      parsed.port = process.env.PORT;
     }
 
     // Devolver el origen + ruta base sin barra final ni parámetros

@@ -185,6 +185,7 @@ async function consumeIntendedRoleCookie(): Promise<string | null> {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   pages: {
     signIn: "/",
     error: "/",

@@ -101,7 +101,7 @@ export const OtpSecurityCard: React.FC = () => {
       {errorMessage && (
         <p className="text-[11px] text-rose-600 font-semibold flex items-center gap-1">
           <AlertCircle className="w-3 h-3" />
-          <span>Código incorrecto. Ingresa {activeOrder.otpCode} o 1234.</span>
+          <span>Código incorrecto. Ingresa {activeOrder.otpCode}.</span>
         </p>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { ServiceCategory } from "@/types";
+import type { ServiceCategory } from "@/types";
 
 export const SERVICE_CATEGORIES: ServiceCategory[] = [
   {

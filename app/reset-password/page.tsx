@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   ArrowLeft,
   Loader2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 type TokenValidationState =
@@ -34,6 +36,8 @@ function ResetPasswordContent() {
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -274,7 +278,7 @@ function ResetPasswordContent() {
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
                     <input
                       id="new-password-input"
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       required
                       autoComplete="new-password"
                       value={password}
@@ -283,8 +287,20 @@ function ResetPasswordContent() {
                         setErrorMessage(null);
                       }}
                       placeholder="••••••••"
-                      className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
+                      className="w-full text-xs pl-9 pr-10 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+                      aria-label={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
                   <PasswordRequirements validation={passwordValidation} />
                 </div>
@@ -300,7 +316,7 @@ function ResetPasswordContent() {
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
                     <input
                       id="confirm-new-password-input"
-                      type="password"
+                      type={showConfirmPassword ? "text" : "password"}
                       required
                       autoComplete="new-password"
                       value={confirmPassword}
@@ -309,8 +325,20 @@ function ResetPasswordContent() {
                         setErrorMessage(null);
                       }}
                       placeholder="••••••••"
-                      className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
+                      className="w-full text-xs pl-9 pr-10 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+                      aria-label={showConfirmPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
 

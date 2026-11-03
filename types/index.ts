@@ -58,6 +58,14 @@ export interface Technician {
 
 export type MediaFileType = "image" | "video";
 
+export interface AiDiagnosisBudget {
+  inspectionAmountCop: number;
+  laborEstimateCop: number;
+  materialsEstimateCop: number;
+  discountAmountCop: number;
+  totalEstimateCop: number;
+}
+
 export interface AiDiagnosisPreset {
   id: string;
   title: string;
@@ -68,6 +76,9 @@ export interface AiDiagnosisPreset {
   confidenceScore: number; // 0 - 100
   confidenceLevel: "high" | "medium" | "low";
   pricingType: "guaranteed_fixed" | "estimated_range";
+  currency?: "COP";
+  budget?: AiDiagnosisBudget;
+  isIndicative?: boolean;
   severity: "baja" | "media" | "alta" | "critica";
   rootCause: string;
   suggestedFix: string;
@@ -88,6 +99,9 @@ export interface AiDiagnosisResult {
   confidenceScore: number;
   confidenceLevel: "high" | "medium" | "low";
   pricingType: "guaranteed_fixed" | "estimated_range";
+  currency?: "COP";
+  budget?: AiDiagnosisBudget;
+  isIndicative?: boolean;
   severity: "baja" | "media" | "alta" | "critica";
   rootCause: string;
   suggestedFix: string;
@@ -106,6 +120,14 @@ export type OrderStatus =
   | "in_progress"
   | "completed"
   | "cancelled";
+
+export type OrderPaymentStatusUi =
+  | "PENDIENTE"
+  | "PREAUTORIZADO"
+  | "CAPTURADO"
+  | "LIBERADO"
+  | "REEMBOLSADO"
+  | "FALLIDO";
 
 export interface ExtraCostRequest {
   id: string;
@@ -136,9 +158,11 @@ export interface ServiceLocation {
 
 export interface ActiveOrder {
   id: string;
+  dbId?: string;
   createdAt: string;
   category: ServiceCategoryId;
   status: OrderStatus;
+  paymentStatus: OrderPaymentStatusUi;
   urgencyType: "immediate" | "scheduled";
   scheduledDate?: string;
   scheduledTimeSlot?: string;
@@ -155,7 +179,12 @@ export interface ActiveOrder {
     discount: number;
     subtotal: number;
     total: number;
-    holdStatus: "authorized_hold" | "liquidated" | "refunded";
+    holdStatus:
+      | "pending_payment"
+      | "authorized_hold"
+      | "liquidated"
+      | "refunded"
+      | "payment_failed";
     paymentMethod: "card" | "apple_pay" | "cash_pos" | "fixi_wallet";
     last4Card?: string;
   };

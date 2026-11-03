@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useFixiStore } from "@/store/useFixiStore";
 import { AlertTriangle, CheckCircle2, XCircle, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { formatCatalogUnitsToCop } from "@/lib/pricing";
 
 export const ExtraCostApprovalModal: React.FC = () => {
   const {
@@ -59,7 +60,7 @@ export const ExtraCostApprovalModal: React.FC = () => {
               Costo Adicional Requerido:
             </span>
             <span className="text-base font-black text-amber-900">
-              +${pendingExtra.amount.toFixed(2)} USD
+              +{formatCatalogUnitsToCop(pendingExtra.amount.toFixed(2))}
             </span>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { AiDiagnosisPreset } from "@/types";
+import type { AiDiagnosisPreset } from "@/types";
 
 export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
   {
@@ -11,6 +11,15 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     confidenceScore: 94,
     confidenceLevel: "high",
     pricingType: "guaranteed_fixed",
+    currency: "COP",
+    isIndicative: false,
+    budget: {
+      inspectionAmountCop: 15000,
+      laborEstimateCop: 48500,
+      materialsEstimateCop: 0,
+      discountAmountCop: 0,
+      totalEstimateCop: 63500,
+    },
     severity: "media",
     rootCause: "Desgaste del empaque cónico O-ring y fisura por sobretensión en la tuerca del sifón de PVC.",
     suggestedFix: "Reemplazo de conjunto de sifón flexible reforzado, sellado con teflón industrial y prueba hidrostática de estanqueidad.",
@@ -29,6 +38,15 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     confidenceScore: 88,
     confidenceLevel: "high",
     pricingType: "guaranteed_fixed",
+    currency: "COP",
+    isIndicative: false,
+    budget: {
+      inspectionAmountCop: 15000,
+      laborEstimateCop: 62000,
+      materialsEstimateCop: 0,
+      discountAmountCop: 0,
+      totalEstimateCop: 77000,
+    },
     severity: "alta",
     rootCause: "Sobrecarga de circuito monofásico con sulfatación de bornera en interruptor termomagnético de 20A.",
     suggestedFix: "Saneamiento de puntas de cable THW Calibre 12, balanceo de carga y sustitución de interruptor termomagnético tipo QO.",
@@ -47,6 +65,15 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     confidenceScore: 91,
     confidenceLevel: "high",
     pricingType: "guaranteed_fixed",
+    currency: "COP",
+    isIndicative: false,
+    budget: {
+      inspectionAmountCop: 15000,
+      laborEstimateCop: 55000,
+      materialsEstimateCop: 0,
+      discountAmountCop: 0,
+      totalEstimateCop: 70000,
+    },
     severity: "critica",
     rootCause: "Bloqueo de contra-pernos por desalineación de rotor y fragmento metálico obstruyendo el tambor europerfil.",
     suggestedFix: "Extracción mecánica con ganzúa extractora y reemplazo de cilindro europerfil antibumping con juego de 5 llaves.",
@@ -65,6 +92,15 @@ export const AI_DIAGNOSIS_PRESETS: AiDiagnosisPreset[] = [
     confidenceScore: 68,
     confidenceLevel: "medium",
     pricingType: "estimated_range",
+    currency: "COP",
+    isIndicative: true,
+    budget: {
+      inspectionAmountCop: 15000,
+      laborEstimateCop: 75000,
+      materialsEstimateCop: 0,
+      discountAmountCop: 0,
+      totalEstimateCop: 90000,
+    },
     severity: "media",
     rootCause: "Posible capilaridad freática o micro-fuga oculta en tubería empotrada de agua fría del departamento contiguo.",
     suggestedFix: "Inspección termográfica in situ para determinar si la fuente es plomería o humedad ascendente, posterior resane impermeabilizante.",

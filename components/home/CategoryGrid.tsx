@@ -3,6 +3,7 @@
 import React from "react";
 import { SERVICE_CATEGORIES } from "@/data/services";
 import { useFixiStore } from "@/store/useFixiStore";
+import { formatCatalogUnitsToCop } from "@/lib/pricing";
 import { Zap, Droplets, Hammer, ShieldAlert, Paintbrush, KeyRound, ChevronRight } from "lucide-react";
 import { ServiceCategoryId } from "@/types";
 
@@ -69,7 +70,7 @@ export const CategoryGrid: React.FC = () => {
               </span>
 
               <span className="text-[10px] text-slate-400 mt-0.5">
-                Desde <strong className="text-slate-700 font-semibold">${cat.startingPrice}</strong>
+                Desde <strong className="text-slate-700 font-semibold">{formatCatalogUnitsToCop(cat.startingPrice)}</strong>
               </span>
 
               <span className="text-[9px] text-emerald-600 font-medium mt-1 flex items-center gap-0.5">

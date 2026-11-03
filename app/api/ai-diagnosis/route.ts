@@ -110,18 +110,67 @@ const DIAGNOSIS_SCHEMA = {
         "guaranteed_fixed si el precio puede fijarse con alta certeza; estimated_range si requiere inspección presencial.",
       enum: ["guaranteed_fixed", "estimated_range"],
     },
+    currency: {
+      type: Type.STRING,
+      description: "Código ISO 4217 de la moneda obligatoria. Debe ser exactamente 'COP'.",
+      enum: ["COP"],
+    },
+    isIndicative: {
+      type: Type.BOOLEAN,
+      description:
+        "true si la estimación es orientativa y sujeta a confirmación en sitio; false únicamente si la avería es estándar y precio garantizado.",
+    },
+    budget: {
+      type: Type.OBJECT,
+      description:
+        "Desglose presupuestario en pesos colombianos (COP). Todos los valores deben ser números enteros sin decimales.",
+      properties: {
+        inspectionAmountCop: {
+          type: Type.INTEGER,
+          description:
+            "Costo de inspección/visita técnica en pesos colombianos (entero COP sin decimales, ej: 25000).",
+        },
+        laborEstimateCop: {
+          type: Type.INTEGER,
+          description:
+            "Mano de obra estimada en pesos colombianos (entero COP sin decimales, ej: 80000).",
+        },
+        materialsEstimateCop: {
+          type: Type.INTEGER,
+          description:
+            "Materiales y refacciones estimados en pesos colombianos (entero COP sin decimales, ej: 30000).",
+        },
+        discountAmountCop: {
+          type: Type.INTEGER,
+          description:
+            "Descuento estimado en pesos colombianos (entero COP sin decimales, ej: 0).",
+        },
+        totalEstimateCop: {
+          type: Type.INTEGER,
+          description:
+            "Total estimado en pesos colombianos (entero COP sin decimales exacto: inspección + mano de obra + materiales - descuento, ej: 135000).",
+        },
+      },
+      required: [
+        "inspectionAmountCop",
+        "laborEstimateCop",
+        "materialsEstimateCop",
+        "discountAmountCop",
+        "totalEstimateCop",
+      ],
+    },
     priceRangeMin: {
       type: Type.INTEGER,
-      description: "Costo mínimo estimado en USD (entero de 2 a 3 dígitos, ej: 40).",
+      description: "Costo mínimo estimado de mano de obra en pesos colombianos (entero COP, ej: 50000).",
     },
     priceRangeMax: {
       type: Type.INTEGER,
-      description: "Costo máximo estimado en USD (entero de 2 a 3 dígitos, ej: 120).",
+      description: "Costo máximo estimado de mano de obra en pesos colombianos (entero COP, ej: 120000).",
     },
     priceFixed: {
       type: Type.INTEGER,
       description:
-        "Precio fijo en USD si pricingType es guaranteed_fixed (entero de 2 a 3 dígitos, ej: 80).",
+        "Precio fijo de mano de obra en pesos colombianos si pricingType es guaranteed_fixed (entero COP, ej: 80000).",
     },
     estimatedHours: {
       type: Type.NUMBER,
@@ -155,6 +204,9 @@ const DIAGNOSIS_SCHEMA = {
     "confidenceScore",
     "confidenceLevel",
     "pricingType",
+    "currency",
+    "budget",
+    "isIndicative",
     "priceRangeMin",
     "priceRangeMax",
     "estimatedHours",
@@ -370,10 +422,20 @@ export async function POST(request: NextRequest) {
 
   const systemInstruction = `Eres Fixi Vision AI, un sistema experto de diagnóstico técnico para servicios del hogar.
 Tu tarea es analizar la evidencia visual (imagen o video) y generar un diagnóstico técnico profesional.
-Contexto:
-- Categoría de servicio: ${categoryName}
-- Moneda: Dólares estadounidenses (USD).
-- Rango de precios: Todos los precios deben ser números enteros en USD de 2 a 3 dígitos (por ejemplo entre 30 y 300 USD). No uses monedas locales ni agregues ceros excesivos.
+Contexto y reglas de moneda obligatorias:
+- País de operación: Colombia.
+- Moneda obligatoria: Peso Colombiano (COP). Código ISO 4217: COP.
+- Todos los importes y presupuestos deben ser valores numéricos enteros en pesos colombianos (COP), sin decimales, acordes al mercado colombiano de reparaciones domésticas.
+- PROHIBIDO TERMINANTEMENTE: Usar USD, dólares, euros, monedas extranjeras o inventar tasas de cambio.
+- Categoría de servicio: ${categoryName}.
+- Si no dispones de información suficiente para un precio definitivo, establece isIndicative=true y pricingType="estimated_range" indicando que es una estimación orientativa sujeta a confirmación presencial del profesional.
+
+Desglose presupuestario en COP (budget):
+- inspectionAmountCop: Costo de visita/inspección técnica en pesos colombianos (típicamente entre 15.000 y 35.000 COP).
+- laborEstimateCop: Estimación de mano de obra en pesos colombianos (típicamente entre 30.000 y 300.000 COP según complejidad).
+- materialsEstimateCop: Costo estimado de materiales o repuestos probables en COP (0 si no se requieren).
+- discountAmountCop: Descuento aplicable en COP (normalmente 0).
+- totalEstimateCop: Suma matemática exacta: inspectionAmountCop + laborEstimateCop + materialsEstimateCop - discountAmountCop.
 Reglas:
 - canDiagnose=true si la evidencia permite formular cualquier hipótesis técnica razonable (la incertidumbre se expresa en confidenceScore bajo).
 - canDiagnose=false ÚNICAMENTE si la evidencia es totalmente ilegible, oscura o no corresponde a la categoría ${categoryName}.
@@ -511,31 +573,61 @@ Reglas:
       Math.max(0, Math.round(rawScore))
     );
 
-    // Validar coherencia de precios
-    const pricingType: string =
-      parsed.pricingType === "guaranteed_fixed" ? "guaranteed_fixed" : "estimated_range";
+    // Validar moneda obligatoria COP
+    if (typeof parsed.currency !== "string" || parsed.currency.trim().toUpperCase() !== "COP") {
+      console.error("[AI-DIAGNOSIS] Moneda devuelta por IA no es COP:", parsed.currency);
+      return NextResponse.json(
+        { error: "No ha sido posible generar una cotización en pesos colombianos (COP). Intente nuevamente o seleccione una falla predefinida." },
+        { status: 422 }
+      );
+    }
 
-    const sanitizePrice = (val: any): number | undefined => {
-      if (typeof val === "number" && Number.isFinite(val) && val >= 10 && val <= 5000) {
-        return Math.round(val);
+    // Validar presupuesto estructurado en COP
+    const rawBudget = parsed.budget;
+    if (!rawBudget || typeof rawBudget !== "object") {
+      console.error("[AI-DIAGNOSIS] Respuesta de IA carece de budget estructurado");
+      return NextResponse.json(
+        { error: INCONCLUSIVE_ERROR },
+        { status: 422 }
+      );
+    }
+
+    const validateCopAmount = (val: unknown, min = 0, max = 50_000_000): number | null => {
+      if (typeof val === "number" && Number.isFinite(val) && Number.isSafeInteger(val) && val >= min && val <= max) {
+        return val;
       }
-      return undefined;
+      return null;
     };
 
-    const priceFixed: number | undefined = sanitizePrice(parsed.priceFixed);
-    let finalPriceRangeMin: number | undefined = sanitizePrice(parsed.priceRangeMin);
-    let finalPriceRangeMax: number | undefined = sanitizePrice(parsed.priceRangeMax);
-    let finalPriceFixed: number | undefined = priceFixed;
+    const inspectionAmountCop = validateCopAmount(rawBudget.inspectionAmountCop, 0);
+    const laborEstimateCop = validateCopAmount(rawBudget.laborEstimateCop, 1000);
+    const materialsEstimateCop = validateCopAmount(rawBudget.materialsEstimateCop, 0);
+    const discountAmountCop = validateCopAmount(rawBudget.discountAmountCop, 0) ?? 0;
+
+    if (inspectionAmountCop === null || laborEstimateCop === null || materialsEstimateCop === null) {
+      console.error("[AI-DIAGNOSIS] Valores de presupuesto en COP inválidos o negativos");
+      return NextResponse.json(
+        { error: "La estimación de presupuesto generada no cumple con el formato monetario colombiano. Intente nuevamente." },
+        { status: 422 }
+      );
+    }
+
+    // Suma matemática exacta del presupuesto
+    const calculatedTotalCop = inspectionAmountCop + laborEstimateCop + materialsEstimateCop - discountAmountCop;
+    const totalEstimateCop = Math.max(0, calculatedTotalCop);
+
+    // Validar coherencia de precios de mano de obra en COP
+    const pricingType: string =
+      parsed.pricingType === "guaranteed_fixed" ? "guaranteed_fixed" : "estimated_range";
+    const isIndicative = Boolean(parsed.isIndicative ?? (pricingType === "estimated_range"));
+
+    let finalPriceFixed: number | undefined = validateCopAmount(parsed.priceFixed, 1000) ?? laborEstimateCop;
+    let finalPriceRangeMin: number | undefined = validateCopAmount(parsed.priceRangeMin, 1000) ?? Math.round(laborEstimateCop * 0.85);
+    let finalPriceRangeMax: number | undefined = validateCopAmount(parsed.priceRangeMax, 1000) ?? Math.round(laborEstimateCop * 1.35);
 
     if (pricingType === "guaranteed_fixed") {
-      finalPriceFixed =
-        priceFixed ??
-        (finalPriceRangeMin && finalPriceRangeMax
-          ? Math.round((finalPriceRangeMin + finalPriceRangeMax) / 2)
-          : 75);
+      finalPriceFixed = finalPriceFixed ?? laborEstimateCop;
     } else {
-      finalPriceRangeMin = finalPriceRangeMin ?? 40;
-      finalPriceRangeMax = finalPriceRangeMax ?? 120;
       if (finalPriceRangeMin > finalPriceRangeMax) {
         const temp = finalPriceRangeMin;
         finalPriceRangeMin = finalPriceRangeMax;
@@ -570,6 +662,15 @@ Reglas:
       pricingType: (["guaranteed_fixed", "estimated_range"].includes(pricingType)
         ? pricingType
         : "estimated_range") as "guaranteed_fixed" | "estimated_range",
+      currency: "COP",
+      isIndicative,
+      budget: {
+        inspectionAmountCop,
+        laborEstimateCop,
+        materialsEstimateCop,
+        discountAmountCop,
+        totalEstimateCop,
+      },
       severity: (["baja", "media", "alta", "critica"].includes(parsed.severity)
         ? parsed.severity
         : "media") as "baja" | "media" | "alta" | "critica",

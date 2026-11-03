@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import { Smartphone, Monitor } from "lucide-react";
 import { useFixiStore } from "@/store/useFixiStore";
 
 interface DeviceFrameProps {
@@ -9,39 +8,10 @@ interface DeviceFrameProps {
 }
 
 export const DeviceFrame: React.FC<DeviceFrameProps> = ({ children }) => {
-  const { isDeviceFrameActive, toggleDeviceFrame } = useFixiStore();
+  const { isDeviceFrameActive } = useFixiStore();
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-start sm:p-4 md:p-6 transition-colors duration-300">
-      {/* Top Floating Control Bar */}
-      <header aria-label="Controles de vista" className="w-full max-w-md sm:max-w-lg md:max-w-4xl flex items-center justify-between py-2.5 px-4 mb-2 text-slate-300 text-xs font-medium">
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-white font-bold tracking-tight text-sm">Fixi</span>
-          <span className="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full font-mono border border-slate-700">
-            PWA Mobile-First
-          </span>
-        </div>
-
-        <button
-          onClick={toggleDeviceFrame}
-          className="flex items-center gap-1.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl border border-slate-700 transition-all text-xs"
-          title="Alternar entre modo smartphone y pantalla completa"
-        >
-          {isDeviceFrameActive ? (
-            <>
-              <Monitor className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Modo Expandido</span>
-            </>
-          ) : (
-            <>
-              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Marco Móvil</span>
-            </>
-          )}
-        </button>
-      </header>
-
       {/* Main Container: either simulated iPhone/Android phone or responsive mobile-first container */}
       <div
         className={`w-full transition-all duration-300 ${

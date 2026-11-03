@@ -380,9 +380,9 @@ export const AdminSupportDashboard: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col pb-12">
-      {/* Top Admin Header */}
-      <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800 px-4 py-3 shadow-md">
+    <div className="w-full bg-slate-50 rounded-2xl flex flex-col pb-12">
+      {/* Top Admin Header - Flujo normal sin sticky para desplazamiento natural */}
+      <header className="w-full bg-slate-900 text-white rounded-2xl border border-slate-800 px-4 py-3 shadow-md mb-4 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
             {selectedTicket ? (

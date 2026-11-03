@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useAuthStore, validateRegistrationPassword, PASSWORD_VALIDATION_ERROR_MESSAGE } from "@/store/useAuthStore";
 import { SERVICE_CATEGORIES } from "@/data/services";
 import { ServiceCategoryId } from "@/types";
-import { User, MapPin, Wrench, Upload, FileText, AlertCircle, Clock, UserPlus } from "lucide-react";
+import { User, MapPin, Wrench, Upload, FileText, AlertCircle, Clock, UserPlus, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PasswordRequirements } from "./PasswordRequirements";
 
@@ -23,6 +23,8 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
   const [city, setCity] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [specialty, setSpecialty] = useState<ServiceCategoryId>("electricidad");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [selectedFile, setSelectedFile] = useState<{
@@ -285,34 +287,62 @@ export const RegisterRepairerForm: React.FC<RegisterRepairerFormProps> = ({
             <label className="block text-xs font-bold text-slate-700 mb-1">
               Contraseña
             </label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setErrorMessage(null);
-              }}
-              placeholder="••••••••"
-              className="w-full text-xs px-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                required
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setErrorMessage(null);
+                }}
+                placeholder="••••••••"
+                className="w-full text-xs pl-3 pr-9 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2.5 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+                aria-label={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
               Confirmar
             </label>
-            <input
-              type="password"
-              required
-              value={confirmPassword}
-              onChange={(e) => {
-                setConfirmPassword(e.target.value);
-                setErrorMessage(null);
-              }}
-              placeholder="••••••••"
-              className="w-full text-xs px-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
-            />
+            <div className="relative">
+              <input
+                type={showConfirmPassword ? "text" : "password"}
+                required
+                value={confirmPassword}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  setErrorMessage(null);
+                }}
+                placeholder="••••••••"
+                className="w-full text-xs pl-3 pr-9 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="absolute right-2.5 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+                aria-label={showConfirmPassword ? "Ocultar contraseña" : "Ver contraseña"}
+              >
+                {showConfirmPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
 

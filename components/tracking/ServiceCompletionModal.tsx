@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useFixiStore } from "@/store/useFixiStore";
 import { Star, ShieldCheck, CheckCircle2, Award, Heart, Receipt, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { formatCatalogUnitsToCop } from "@/lib/pricing";
 import confetti from "canvas-confetti";
 
 export const ServiceCompletionModal: React.FC = () => {
@@ -71,7 +72,7 @@ export const ServiceCompletionModal: React.FC = () => {
                   Cobro Liquidado (Hold Liberado)
                 </span>
                 <p className="text-sm font-black text-slate-900">
-                  ${pricing.total.toFixed(2)} USD
+                  {formatCatalogUnitsToCop(pricing.total.toFixed(2))}
                 </p>
                 <p className="text-[10px] text-slate-500">
                   Facturado a Tarjeta •••• {pricing.last4Card}
@@ -146,7 +147,7 @@ export const ServiceCompletionModal: React.FC = () => {
                         : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                     }`}
                   >
-                    {tip === 0 ? "Sin propina" : `+$${tip}`}
+                    {tip === 0 ? "Sin propina" : `+${formatCatalogUnitsToCop(tip)}`}
                   </button>
                 ))}
               </div>

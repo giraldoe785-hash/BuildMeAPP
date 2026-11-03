@@ -104,6 +104,8 @@ enum EstadoCostoAdicional {
 enum MetodoPago {
   TARJETA
   FIXI_WALLET
+  APPLE_PAY
+  CASH_POS
 
   @@map("metodo_pago")
 }
@@ -124,8 +126,37 @@ enum TipoMovimientoWallet {
   PAGO_SERVICIO
   REEMBOLSO_GARANTIA
   TRANSFERENCIA_PROPINA
+  AJUSTE_COMPENSATORIO
 
   @@map("tipo_movimiento_wallet")
+}
+
+enum NaturalezaMovimientoWallet {
+  CREDITO
+  DEBITO
+
+  @@map("naturaleza_movimiento_wallet")
+}
+
+enum EstadoRecargaWallet {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+  EN_DISPUTA
+  ANULADA_WOMPI
+  REVERSADA_ADMIN
+  ANOMALIA_CONFIRMACION_TARDIA
+  EXPIRADA_LOCALMENTE
+
+  @@map("estado_recarga_wallet")
+}
+
+enum EstadoConciliacionRecarga {
+  CONCILIADO
+  PENDIENTE_INVESTIGACION
+  AJUSTADO_MANUAL
+
+  @@map("estado_conciliacion_recarga")
 }
 
 enum EstadoGarantia {
@@ -193,9 +224,12 @@ enum DestinoReembolso {
 }
 
 enum EstadoReembolso {
-  SOLICITADO @map("solicitado")
-  PROCESADO  @map("procesado")
-  FALLIDO    @map("fallido")
+  SOLICITADO                   @map("solicitado")
+  PENDIENTE_SEGUNDA_APROBACION @map("pendiente_segunda_aprobacion")
+  AUTORIZADO                   @map("autorizado")
+  PROCESADO                    @map("procesado")
+  RECHAZADO                    @map("rechazado")
+  FALLIDO                      @map("fallido")
 
   @@map("estado_reembolso")
 }
@@ -243,8 +277,20 @@ model Usuario {
   ticketsAsignados             TicketSoporte[]        @relation("TicketAgente")
   mensajesSoporte              MensajeSoporte[]
   trazabilidadesOrden          OrdenTrazabilidad[]    @relation("TrazabilidadUsuario")
-  reembolsosAutorizados        ReembolsoTransaccion[] @relation("ReembolsoAutorizador")
-  reembolsosSegundoAutorizador ReembolsoTransaccion[] @relation("ReembolsoSegundoAutorizador")
+  reembolsosComoBeneficiario   ReembolsoTransaccion[] @relation("ReembolsoBeneficiario")
+  reembolsosSolicitados        ReembolsoTransaccion[] @relation("ReembolsoSolicitante")
+  reembolsosAutorizados        ReembolsoTransaccion[] @relation("ReembolsoAutorizador1")
+  reembolsosSegundoAutorizador ReembolsoTransaccion[] @relation("ReembolsoAutorizador2")
+  transaccionesWallet          TransaccionWallet[]
+  recargasWallet               RecargaWallet[]
+  permisosAsignados            UsuarioPermisoInterno[]          @relation("PermisosAsignados")
+  permisosOtorgados            UsuarioPermisoInterno[]          @relation("PermisosOtorgados")
+  evidenciasReclamacionSubidas EvidenciaMultimediaReclamacion[] @relation("EvidenciasSubidas")
+  inspeccionesGarantiaAsignadas OrdenInspeccionGarantia[]        @relation("ReparadorInspecciones")
+  intervencionesOperativas     IntervencionOperativa[]          @relation("AgenteIntervenciones")
+  liquidacionesReparador       MovimientoLiquidacionReparador[] @relation("LiquidacionesReparador")
+  ajustesLiquidacionAplicados  MovimientoLiquidacionReparador[] @relation("AjustesLiquidacionAutorizador")
+  muestrasTelemetria           MuestraTelemetriaReparador[]     @relation("TelemetriaReparador")
   sesionUsuarios               SesionUsuario[]
   identidadesOAuth             IdentidadOAuth[]
   desafiosMfa                  DesafioMfa[]
@@ -444,7 +490,8 @@ model Cupon {
 model OrdenServicio {
   id String @id @default(uuid()) @db.Uuid
 
-  numeroOrden String @unique @db.VarChar(50)
+  numeroOrden       String  @unique @db.VarChar(50)
+  claveIdempotencia String? @db.VarChar(100)
 
   clienteId   String  @db.Uuid
   reparadorId String? @db.Uuid
@@ -533,7 +580,23 @@ model OrdenServicio {
   ticketsSoporte        TicketSoporte[]
   reembolsos            ReembolsoTransaccion[]
   reclamacionesGarantia ReclamacionGarantia[]  @relation("OrdenGarantia")
+  intentosPagoWompi     IntentoPagoWompi[]
+  inspeccionesGarantia  OrdenInspeccionGarantia[]        @relation("InspeccionesGarantia")
+  intervencionesOperativas IntervencionOperativa[]
+  liquidacionesReparador MovimientoLiquidacionReparador[]
+  muestrasTelemetria    MuestraTelemetriaReparador[]
 
+  // Nota de mantenimiento sobre concurrencia e idempotencia:
+  // En PostgreSQL existe además el índice único parcial:
+  //   CREATE UNIQUE INDEX "ordenes_servicio_cliente_activa_idx"
+  //   ON "ordenes_servicio" ("cliente_id")
+  //   WHERE "estado" IN ('BUSCANDO', 'ASIGNADO', 'EN_CAMINO', 'EN_SITIO', 'EN_PROGRESO', 'ESPERANDO_APROBACION_COSTO_EXTRA', 'DISPUTA');
+  // definido en prisma/migrations/20260420000000_orders_persistence_idempotency/migration.sql.
+  // Prisma 7.10 no representa índices parciales con cláusula WHERE en schema.prisma;
+  // cualquier migración futura generada con `prisma migrate dev` debe inspeccionarse
+  // para conservar `ordenes_servicio_cliente_activa_idx` y no emitir DROP INDEX sobre él.
+  @@unique([clienteId, claveIdempotencia])
+  @@unique([id, clienteId])
   @@index([clienteId])
   @@index([reparadorId])
   @@index([categoriaId])
@@ -658,14 +721,21 @@ model FixiWallet {
   id        String @id @default(uuid()) @db.Uuid
   usuarioId String @unique @db.Uuid
 
-  saldoDisponible Decimal @default(0) @db.Decimal(12, 2)
-  saldoRetenido   Decimal @default(0) @db.Decimal(12, 2)
+  saldoDisponibleCentavos BigInt  @default(0)
+  saldoRetenidoCentavos   BigInt  @default(0)
+  bloqueadaParaDebito     Boolean @default(false)
+  requiereReconciliacion  Boolean @default(false)
+
+  saldoDisponible Decimal? @default(0) @db.Decimal(12, 2)
+  saldoRetenido   Decimal? @default(0) @db.Decimal(12, 2)
 
   actualizadoEn DateTime @updatedAt
 
-  usuario       Usuario             @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuario       Usuario             @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
   transacciones TransaccionWallet[]
+  recargas      RecargaWallet[]
 
+  @@unique([id, usuarioId])
   @@map("fixi_wallets")
 }
 
@@ -674,23 +744,82 @@ model FixiWallet {
 // ============================================================
 
 model TransaccionWallet {
-  id       String  @id @default(uuid()) @db.Uuid
-  walletId String  @db.Uuid
-  ordenId  String? @db.Uuid
+  id        String @id @default(uuid()) @db.Uuid
+  walletId  String @db.Uuid
+  usuarioId String @db.Uuid
 
-  tipo              TipoMovimientoWallet
-  monto             Decimal              @db.Decimal(10, 2)
-  referenciaExterna String?              @db.VarChar(100)
+  tipo                     TipoMovimientoWallet
+  naturaleza               NaturalezaMovimientoWallet?
+  montoEnCentavos          BigInt
+  saldoAnteriorCentavos    BigInt?
+  saldoPosteriorCentavos   BigInt?
+  esLegadoSinSnapshots     Boolean                     @default(false)
+  esMovimientoEnCuarentena Boolean                     @default(false)
+
+  claveIdempotencia String  @unique @db.VarChar(100)
+  referenciaExterna String? @db.VarChar(100)
   descripcion       String
 
+  recargaId   String? @db.Uuid
+  ordenId     String? @db.Uuid
+  reembolsoId String? @db.Uuid
+  ticketId    String? @db.Uuid
+
+  monto    Decimal? @db.Decimal(10, 2)
   creadoEn DateTime @default(now())
 
-  wallet FixiWallet     @relation(fields: [walletId], references: [id], onDelete: Cascade)
-  orden  OrdenServicio? @relation(fields: [ordenId], references: [id])
+  wallet    FixiWallet            @relation(fields: [walletId, usuarioId], references: [id, usuarioId], onDelete: Restrict)
+  usuario   Usuario               @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  recarga   RecargaWallet?        @relation(fields: [recargaId, walletId, usuarioId], references: [id, walletId, usuarioId], onDelete: Restrict)
+  orden     OrdenServicio?        @relation(fields: [ordenId, usuarioId], references: [id, clienteId], onDelete: Restrict)
+  reembolso ReembolsoTransaccion? @relation("TransaccionReembolso", fields: [reembolsoId, usuarioId], references: [id, clienteBeneficiarioId], onDelete: Restrict)
+  ticket    TicketSoporte?        @relation(fields: [ticketId], references: [id], onDelete: Restrict)
 
-  @@index([walletId, creadoEn]) // [MEJORA] historial de movimientos, más reciente primero
+  @@index([walletId, creadoEn])
+  @@index([usuarioId])
+  @@index([recargaId])
   @@index([ordenId])
+  @@index([reembolsoId])
+  @@index([ticketId])
   @@map("transacciones_wallet")
+}
+
+// ============================================================
+// 15B. RECARGAS WALLET
+// ============================================================
+
+model RecargaWallet {
+  id        String @id @default(uuid()) @db.Uuid
+  walletId  String @db.Uuid
+  usuarioId String @db.Uuid
+
+  montoEnCentavos        BigInt
+  montoEnDisputaCentavos BigInt @default(0)
+
+  estado             EstadoRecargaWallet       @default(PENDIENTE)
+  estadoConciliacion EstadoConciliacionRecarga @default(CONCILIADO)
+
+  intentoGanadorId  String? @unique @db.Uuid
+  ticketSoporteId   String? @db.Uuid
+  claveIdempotencia String  @unique @db.VarChar(100)
+
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  procesadoEn   DateTime?
+
+  wallet         FixiWallet          @relation(fields: [walletId, usuarioId], references: [id, usuarioId], onDelete: Restrict)
+  usuario        Usuario             @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  intentoGanador IntentoPagoWompi?   @relation("RecargaIntentoGanador", fields: [intentoGanadorId], references: [id], onDelete: Restrict)
+  intentos       IntentoPagoWompi[]  @relation("RecargaIntentos")
+  ticketSoporte  TicketSoporte?      @relation(fields: [ticketSoporteId], references: [id], onDelete: Restrict)
+  transacciones  TransaccionWallet[]
+
+  @@unique([id, walletId, usuarioId])
+  @@index([walletId])
+  @@index([usuarioId])
+  @@index([estado, creadoEn])
+  @@index([ticketSoporteId])
+  @@map("recargas_wallet")
 }
 
 // ============================================================
@@ -751,6 +880,8 @@ model TicketSoporte {
   mensajes            MensajeSoporte[]
   reclamacionGarantia ReclamacionGarantia?
   reembolsos          ReembolsoTransaccion[]
+  transaccionesWallet TransaccionWallet[]
+  recargasDisputadas  RecargaWallet[]
 
   @@index([usuarioEmisorId])
   @@index([agenteAsignadoId])
@@ -802,6 +933,9 @@ model ReclamacionGarantia {
   ticket        TicketSoporte    @relation(fields: [ticketId], references: [id])
   ordenGarantia OrdenServicio?   @relation("OrdenGarantia", fields: [ordenGarantiaId], references: [id])
 
+  evidenciasMultimedia EvidenciaMultimediaReclamacion[]
+  ordenInspeccion      OrdenInspeccionGarantia?
+
   @@index([garantiaId])
   @@index([ordenGarantiaId])
   @@map("reclamaciones_garantia")
@@ -815,35 +949,61 @@ model ReembolsoTransaccion {
   id                String @id @default(uuid()) @db.Uuid
   numeroComprobante String @unique @db.VarChar(50)
 
-  ordenId  String  @db.Uuid
-  ticketId String? @db.Uuid
+  ordenId               String  @db.Uuid
+  clienteBeneficiarioId String  @db.Uuid
+  ticketId              String? @db.Uuid
 
-  autorizadoPorUsuarioId String  @db.Uuid
-  segundoAutorizadorId   String? @db.Uuid
+  solicitanteId          String?     @db.Uuid
+  esLegadoSinSolicitante Boolean     @default(false)
+  rolSolicitante         RolUsuario?
 
-  destino DestinoReembolso
-  estado  EstadoReembolso  @default(SOLICITADO)
+  autorizador1Id      String?         @db.Uuid
+  rolAutorizador1     RolUsuario?
+  permisoAutorizador1 PermisoInterno?
+  fechaAutorizacion1  DateTime?
 
-  monto            Decimal @db.Decimal(10, 2)
-  motivo           String
-  pasarelaRefundId String? @db.VarChar(100)
-  errorDetalle     String? @db.VarChar(255)
+  autorizador2Id      String?         @db.Uuid
+  rolAutorizador2     RolUsuario?
+  permisoAutorizador2 PermisoInterno?
+  fechaAutorizacion2  DateTime?
 
-  creadoEn                 DateTime  @default(now())
-  fechaAutorizacion        DateTime?
-  fechaSegundaAutorizacion DateTime?
-  procesadoEn              DateTime?
+  destino         DestinoReembolso
+  estado          EstadoReembolso  @default(SOLICITADO)
+  montoEnCentavos BigInt
+  monto           Decimal?         @db.Decimal(10, 2)
 
-  orden              OrdenServicio  @relation(fields: [ordenId], references: [id])
-  ticket             TicketSoporte? @relation(fields: [ticketId], references: [id])
-  autorizadoPor      Usuario        @relation("ReembolsoAutorizador", fields: [autorizadoPorUsuarioId], references: [id])
-  segundoAutorizador Usuario?       @relation("ReembolsoSegundoAutorizador", fields: [segundoAutorizadorId], references: [id])
+  motivo             String
+  pasarelaRefundId   String?        @db.VarChar(100)
+  errorDetalle       String?        @db.VarChar(255)
+  tipoReembolso      TipoReembolso?
+  claveIdempotencia  String?        @unique @db.VarChar(100)
+  wompiTransactionId String?        @db.VarChar(100)
+  intentoPagoWompiId String?        @db.Uuid
+  estadoProveedor    String?        @db.VarChar(50)
 
+  creadoEn    DateTime  @default(now())
+  procesadoEn DateTime?
+
+  orden                  OrdenServicio                    @relation(fields: [ordenId, clienteBeneficiarioId], references: [id, clienteId], onDelete: Restrict)
+  clienteBeneficiario    Usuario                          @relation("ReembolsoBeneficiario", fields: [clienteBeneficiarioId], references: [id], onDelete: Restrict)
+  ticket                 TicketSoporte?                   @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  solicitante            Usuario?                         @relation("ReembolsoSolicitante", fields: [solicitanteId], references: [id], onDelete: Restrict)
+  autorizador1           Usuario?                         @relation("ReembolsoAutorizador1", fields: [autorizador1Id], references: [id], onDelete: Restrict)
+  autorizador2           Usuario?                         @relation("ReembolsoAutorizador2", fields: [autorizador2Id], references: [id], onDelete: Restrict)
+  intentoPagoWompi       IntentoPagoWompi?                @relation(fields: [intentoPagoWompiId], references: [id], onDelete: Restrict)
+  transaccionesWallet    TransaccionWallet[]              @relation("TransaccionReembolso")
+  movimientosLiquidacion MovimientoLiquidacionReparador[]
+
+  @@unique([id, clienteBeneficiarioId])
   @@index([ordenId])
+  @@index([clienteBeneficiarioId])
   @@index([ticketId])
   @@index([estado])
-  @@index([autorizadoPorUsuarioId])
-  @@index([segundoAutorizadorId])
+  @@index([solicitanteId])
+  @@index([autorizador1Id])
+  @@index([autorizador2Id])
+  @@index([wompiTransactionId])
+  @@index([intentoPagoWompiId])
   @@map("reembolsos_transacciones")
 }
 
@@ -954,4 +1114,272 @@ model TokenRecuperacionPassword {
   @@index([usuarioId, consumidoEn, invalidadoEn])
   @@index([fechaExpira])
   @@map("tokens_recuperacion_password")
+}
+
+// ============================================================
+// 21. WOMPI, HU24 FIXICARE, HU25 CONTINGENCIAS Y HU26 REEMBOLSOS (FASE 2A)
+// ============================================================
+
+enum EstadoIntentoPago {
+  PENDIENTE
+  PENDIENTE_CONCILIACION
+  APROBADO
+  RECHAZADO
+  ANULADO
+  FALLIDO
+
+  @@map("estado_intento_pago")
+}
+
+model IntentoPagoWompi {
+  id                  String            @id @default(uuid()) @db.Uuid
+  ordenId             String?           @db.Uuid
+  recargaId           String?           @db.Uuid
+  referenciaWompi     String            @unique @db.VarChar(100)
+  montoEnCentavos     BigInt
+  moneda              String            @default("COP") @db.VarChar(3)
+  estado              EstadoIntentoPago @default(PENDIENTE)
+  estadoProveedor     String?           @db.VarChar(30)
+  ambiente            String            @default("test") @db.VarChar(10)
+  wompiTransactionId  String?           @unique @db.VarChar(100)
+  metodoPagoReportado String?           @db.VarChar(50)
+  firmaIntegridad     String            @db.VarChar(255)
+  datosRespuestaJson  String?
+  creadoEn            DateTime          @default(now())
+  actualizadoEn       DateTime          @default(now()) @updatedAt
+
+  orden             OrdenServicio?         @relation(fields: [ordenId], references: [id], onDelete: Restrict)
+  recarga           RecargaWallet?         @relation("RecargaIntentos", fields: [recargaId], references: [id], onDelete: Restrict)
+  recargaAcreditada RecargaWallet?         @relation("RecargaIntentoGanador")
+  reembolsos        ReembolsoTransaccion[]
+
+  @@unique([id, recargaId])
+  @@index([ordenId])
+  @@index([recargaId])
+  @@index([estado, creadoEn])
+  @@map("intentos_pago_wompi")
+}
+
+model EventoWebhookWompi {
+  id                 String   @id @default(uuid()) @db.Uuid
+  claveDeduplicacion String   @unique @db.VarChar(128)
+  ambiente           String   @db.VarChar(10)
+  tipoEvento         String   @db.VarChar(50)
+  timestampEvento    Int
+  wompiTransactionId String?  @db.VarChar(100)
+  checksumRecibido   String   @db.VarChar(64)
+  resumenPayloadJson String?
+  procesadoExitoso   Boolean  @default(false)
+  errorProcesamiento String?  @db.VarChar(500)
+  creadoEn           DateTime @default(now())
+
+  @@index([wompiTransactionId])
+  @@index([ambiente, creadoEn])
+  @@map("eventos_webhook_wompi")
+}
+
+enum PermisoInterno {
+  SOPORTE_OPERATIVO
+  SOPORTE_NIVEL_2
+  ADMIN_FINANCIERO
+
+  @@map("permiso_interno")
+}
+
+model UsuarioPermisoInterno {
+  id                   String         @id @default(uuid()) @db.Uuid
+  usuarioId            String         @db.Uuid
+  permiso              PermisoInterno
+  asignadoPorUsuarioId String         @db.Uuid
+  creadoEn             DateTime       @default(now())
+
+  usuario     Usuario @relation("PermisosAsignados", fields: [usuarioId], references: [id], onDelete: Restrict)
+  asignadoPor Usuario @relation("PermisosOtorgados", fields: [asignadoPorUsuarioId], references: [id])
+
+  @@unique([usuarioId, permiso])
+  @@index([usuarioId])
+  @@map("usuario_permisos_internos")
+}
+
+model EvidenciaMultimediaReclamacion {
+  id                 String   @id @default(uuid()) @db.Uuid
+  reclamacionId      String   @db.Uuid
+  archivoKey         String   @db.VarChar(255)
+  mimeType           String   @db.VarChar(100)
+  tamanoBytes        Int
+  duracionSegundos   Int?
+  subidoPorUsuarioId String   @db.Uuid
+  creadoEn           DateTime @default(now())
+
+  reclamacion ReclamacionGarantia @relation(fields: [reclamacionId], references: [id], onDelete: Restrict)
+  subidoPor   Usuario             @relation("EvidenciasSubidas", fields: [subidoPorUsuarioId], references: [id])
+
+  @@index([reclamacionId])
+  @@map("evidencias_multimedia_reclamacion")
+}
+
+enum EstadoInspeccionGarantia {
+  PENDIENTE_ASIGNACION
+  ASIGNADA
+  EN_CURSO
+  DICTAMINADA
+  CANCELADA
+
+  @@map("estado_inspeccion_garantia")
+}
+
+model OrdenInspeccionGarantia {
+  id               String                   @id @default(uuid()) @db.Uuid
+  numeroInspeccion String                   @unique @db.VarChar(50)
+  reclamacionId    String                   @unique @db.Uuid
+  ordenOriginalId  String                   @db.Uuid
+  reparadorId      String?                  @db.Uuid
+  estado           EstadoInspeccionGarantia @default(PENDIENTE_ASIGNACION)
+
+  direccionInspeccion String   @db.VarChar(255)
+  latitud             Decimal? @db.Decimal(10, 7)
+  longitud            Decimal? @db.Decimal(10, 7)
+
+  fechaProgramada DateTime?
+  fechaAsignacion DateTime?
+  fechaDictamen   DateTime?
+  dictamenDetalle String?
+
+  creadoEn DateTime @default(now())
+
+  reclamacion   ReclamacionGarantia @relation(fields: [reclamacionId], references: [id], onDelete: Restrict)
+  ordenOriginal OrdenServicio       @relation("InspeccionesGarantia", fields: [ordenOriginalId], references: [id])
+  reparador     Usuario?            @relation("ReparadorInspecciones", fields: [reparadorId], references: [id])
+
+  @@index([ordenOriginalId])
+  @@index([reparadorId])
+  @@map("ordenes_inspeccion_garantia")
+}
+
+enum TipoContingenciaOperativa {
+  FALLO_OTP_INICIO
+  FALLO_OTP_CIERRE
+  INCOMPARECENCIA_CLIENTE
+  INCOMPARECENCIA_REPARADOR
+  DESVIO_RUTA_O_DEMORA
+
+  @@map("tipo_contingencia_operativa")
+}
+
+enum ResultadoIntervencion {
+  RESUELTO_INICIO_FORZADO
+  RESUELTO_CIERRE_FORZADO
+  CANCELADO_INCOMPARECENCIA
+  RECHAZADO_SIN_EVIDENCIA
+
+  @@map("resultado_intervencion")
+}
+
+model IntervencionOperativa {
+  id               String                    @id @default(uuid()) @db.Uuid
+  ordenId          String                    @db.Uuid
+  agenteId         String                    @db.Uuid
+  tipoContingencia TipoContingenciaOperativa
+  resultado        ResultadoIntervencion
+  justificacion    String
+
+  latitudRegistrada            Decimal? @db.Decimal(10, 7)
+  longitudRegistrada           Decimal? @db.Decimal(10, 7)
+  distanciaCalculadaMetros     Decimal? @db.Decimal(8, 2)
+  antiguedadTelemetriaSegundos Int?
+
+  referenciaContactoTelefonico String? @db.VarChar(100)
+  contactoConfirmado           Boolean @default(false)
+
+  estadoAnterior EstadoOrden
+  estadoNuevo    EstadoOrden
+
+  creadoEn DateTime @default(now())
+
+  orden  OrdenServicio @relation(fields: [ordenId], references: [id])
+  agente Usuario       @relation("AgenteIntervenciones", fields: [agenteId], references: [id])
+
+  @@index([ordenId])
+  @@index([agenteId])
+  @@map("intervenciones_operativas")
+}
+
+model MuestraTelemetriaReparador {
+  id                       String   @id @default(uuid()) @db.Uuid
+  reparadorId              String   @db.Uuid
+  ordenId                  String   @db.Uuid
+  latitud                  Decimal  @db.Decimal(10, 7)
+  longitud                 Decimal  @db.Decimal(10, 7)
+  precisionMetros          Decimal? @db.Decimal(6, 2)
+  distanciaCalculadaMetros Decimal? @db.Decimal(8, 2)
+  enSitio                  Boolean  @default(false)
+  recibidoEnServidor       DateTime @default(now())
+
+  reparador Usuario       @relation("TelemetriaReparador", fields: [reparadorId], references: [id], onDelete: Restrict)
+  orden     OrdenServicio @relation(fields: [ordenId], references: [id], onDelete: Restrict)
+
+  @@index([ordenId, recibidoEnServidor])
+  @@index([reparadorId, recibidoEnServidor])
+  @@map("muestras_telemetria_reparador")
+}
+
+enum TipoReembolso {
+  TOTAL
+  PARCIAL
+
+  @@map("tipo_reembolso")
+}
+
+enum TipoAjusteLiquidacion {
+  DESCUENTO_GARANTIA
+  PENALIZACION_INCOMPARECENCIA
+  COMPENSACION_INCOMPARECENCIA_CLIENTE
+  AJUSTE_ARBITRAJE
+
+  @@map("tipo_ajuste_liquidacion")
+}
+
+model MovimientoLiquidacionReparador {
+  id                String                @id @default(uuid()) @db.Uuid
+  reparadorId       String                @db.Uuid
+  ordenId           String?               @db.Uuid
+  reembolsoId       String?               @db.Uuid
+  tipo              TipoAjusteLiquidacion
+  monto             Decimal               @db.Decimal(10, 2)
+  descripcion       String
+  aplicadoPorId     String                @db.Uuid
+  claveIdempotencia String                @unique @db.VarChar(100)
+  creadoEn          DateTime              @default(now())
+
+  reparador   Usuario               @relation("LiquidacionesReparador", fields: [reparadorId], references: [id])
+  orden       OrdenServicio?        @relation(fields: [ordenId], references: [id], onDelete: Restrict)
+  reembolso   ReembolsoTransaccion? @relation(fields: [reembolsoId], references: [id], onDelete: Restrict)
+  aplicadoPor Usuario               @relation("AjustesLiquidacionAutorizador", fields: [aplicadoPorId], references: [id])
+
+  @@index([reparadorId, creadoEn])
+  @@map("movimientos_liquidacion_reparador")
+}
+
+enum EstadoOutbox {
+  PENDIENTE
+  ENVIADO
+  FALLIDO
+
+  @@map("estado_outbox")
+}
+
+model NotificacionOutbox {
+  id                String       @id @default(uuid()) @db.Uuid
+  tipoEvento        String       @db.VarChar(50)
+  payloadJson       String
+  destinatarioEmail String       @db.VarChar(255)
+  estado            EstadoOutbox @default(PENDIENTE)
+  intentos          Int          @default(0)
+  ultimoError       String?      @db.VarChar(500)
+  claveIdempotencia String       @unique @db.VarChar(100)
+  creadoEn          DateTime     @default(now())
+  procesadoEn       DateTime?
+
+  @@index([estado, creadoEn])
+  @@map("notificaciones_outbox")
 }

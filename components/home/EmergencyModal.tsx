@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { useFixiStore } from "@/store/useFixiStore";
-import { Flame, PhoneCall, Zap, Droplets, KeyRound, Wind, AlertTriangle, ShieldCheck } from "lucide-react";
+import { computeOrderPricing } from "@/lib/pricing";
+import { redirectOrderToWompiCheckout } from "@/lib/wompiCheckoutClient";
+import { Flame, PhoneCall, Zap, Droplets, KeyRound, Wind, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
 const EMERGENCY_TYPES = [
@@ -51,15 +53,80 @@ export const EmergencyModal: React.FC = () => {
 
   const [selectedEmergency, setSelectedEmergency] = useState<string>("em-electric");
   const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const idempotencyKeyRef = useRef<string>(
+    `emg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
+  const inFlightRef = useRef(false);
 
-  const handleInstantEmergencyDispatch = () => {
+  const handleInstantEmergencyDispatch = async () => {
+    if (inFlightRef.current || isDispatching) return;
+    inFlightRef.current = true;
     setIsDispatching(true);
-    setTimeout(() => {
-      setIsDispatching(false);
+    setDispatchError(null);
+
+    const emergencyDef =
+      EMERGENCY_TYPES.find((e) => e.id === selectedEmergency) || EMERGENCY_TYPES[0];
+    const emergencyPricing = computeOrderPricing({
+      category: emergencyDef.category,
+      presetId: null,
+      promoCode: null,
+    });
+
+    useFixiStore.setState({
+      selectedCategoryForWizard: emergencyDef.category as "electricidad" | "plomeria" | "cerrajeria",
+      scheduleType: "immediate",
+      paymentMethod: "card",
+      promoCode: "",
+      discountApplied: 0,
+      currentDiagnosis: {
+        title: `Emergencia 24/7: ${emergencyDef.title}`,
+        confidenceScore: 98,
+        confidenceLevel: "high",
+        pricingType: "guaranteed_fixed",
+        currency: "COP",
+        isIndicative: false,
+        budget: {
+          inspectionAmountCop: Math.round(emergencyPricing.baseInspection * 1000),
+          laborEstimateCop: Math.round(emergencyPricing.laborEstimate * 1000),
+          materialsEstimateCop: 0,
+          discountAmountCop: 0,
+          totalEstimateCop: Math.round(emergencyPricing.total * 1000),
+        },
+        severity: "critica",
+        rootCause: emergencyDef.desc,
+        suggestedFix: `Despacho prioritario de guardia (${emergencyDef.title}). Aseguramiento inmediato y reparación en sitio.`,
+        requiredMaterials: ["Kit de emergencia prioritaria"],
+        estimatedHours: 1.5,
+        priceFixed: emergencyPricing.laborEstimate,
+        method: "Análisis_IA",
+      },
+    });
+
+    try {
+      const result = await confirmBookingAndHoldFunds(idempotencyKeyRef.current);
+      if (!result.success || !result.order) {
+        setDispatchError(
+          result.error || "No fue posible despachar la solicitud de emergencia."
+        );
+        return;
+      }
+
+      idempotencyKeyRef.current = `emg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       setEmergencyModalOpen(false);
-      // Fast dispatch straight to live tracking
-      confirmBookingAndHoldFunds();
-    }, 1500);
+      useFixiStore.getState().setActiveTab("tracking");
+
+      const targetOrderUuid = result.order.dbId || result.order.id;
+      try {
+        await redirectOrderToWompiCheckout(targetOrderUuid);
+      } catch {
+        // Si la redirección automática no puede completarse, el cliente queda en
+        // tracking sobre PendingPaymentTrackingCard para iniciar o reintentar el pago.
+      }
+    } finally {
+      inFlightRef.current = false;
+      setIsDispatching(false);
+    }
   };
 
   return (
@@ -124,6 +191,13 @@ export const EmergencyModal: React.FC = () => {
           </div>
         </div>
 
+        {dispatchError && (
+          <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-2 text-xs text-rose-700 font-semibold">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+            <span>{dispatchError}</span>
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="pt-2 space-y-2">
           <Button
@@ -131,6 +205,7 @@ export const EmergencyModal: React.FC = () => {
             size="lg"
             className="w-full flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30"
             isLoading={isDispatching}
+            disabled={isDispatching}
             onClick={handleInstantEmergencyDispatch}
           >
             <Flame className="w-5 h-5 fill-white" />

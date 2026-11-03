@@ -1,0 +1,54 @@
+# ==============================================================================
+# BuildMeAPP - Docker Build Context Exclusion (.dockerignore)
+# ==============================================================================
+
+# Version control
+.git
+.gitignore
+
+# Dependencies and build caches
+node_modules
+.next
+out
+dist
+build
+.swc
+
+# Local Prisma generated client from host (regenerated inside Linux container)
+generated/prisma
+
+# Environment variables and private secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+
+# Local storage and persistent upload artifacts
+storage
+storage/
+
+# Logs and debug files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# Testing, coverage and build metadata
+coverage
+.nyc_output
+*.tsbuildinfo
+test-results/
+
+# Agent configurations, editor and OS artifacts
+.agents
+.claude
+.windsurf
+.vscode
+.idea
+.DS_Store
+Thumbs.db

@@ -6,7 +6,7 @@ import {
   validateRegistrationPassword,
   type VerificationCodeStatus,
 } from "@/store/useAuthStore";
-import { User, Lock, Mail, UserPlus, AlertCircle } from "lucide-react";
+import { User, Lock, Mail, UserPlus, AlertCircle, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { PasswordRequirements } from "./PasswordRequirements";
 import { VerifyEmailForm } from "./VerifyEmailForm";
@@ -30,6 +30,8 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -197,7 +199,7 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({
           <div className="relative">
             <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
             <input
-              type="password"
+              type={showPassword ? "text" : "password"}
               required
               value={password}
               onChange={(e) => {
@@ -205,8 +207,20 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({
                 setErrorMessage(null);
               }}
               placeholder="••••••••"
-              className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
+              className="w-full text-xs pl-9 pr-10 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+              aria-label={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+            >
+              {showPassword ? (
+                <EyeOff className="w-4 h-4" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+            </button>
           </div>
           {/* Indicador de requisitos en tiempo real */}
           <PasswordRequirements validation={passwordValidation} />
@@ -220,7 +234,7 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({
           <div className="relative">
             <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5 pointer-events-none" />
             <input
-              type="password"
+              type={showConfirmPassword ? "text" : "password"}
               required
               value={confirmPassword}
               onChange={(e) => {
@@ -228,8 +242,20 @@ export const RegisterClientForm: React.FC<RegisterClientFormProps> = ({
                 setErrorMessage(null);
               }}
               placeholder="••••••••"
-              className="w-full text-xs pl-9 pr-3 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
+              className="w-full text-xs pl-9 pr-10 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-900"
             />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none"
+              aria-label={showConfirmPassword ? "Ocultar contraseña" : "Ver contraseña"}
+            >
+              {showConfirmPassword ? (
+                <EyeOff className="w-4 h-4" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </div>
 

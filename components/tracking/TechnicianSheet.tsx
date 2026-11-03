@@ -97,14 +97,14 @@ export const TechnicianSheet: React.FC = () => {
         {/* Dynamic action buttons based on status */}
         <div className="grid grid-cols-2 gap-2">
           {status === "finding_tech" && (
-            <Button
-              variant="primary"
-              size="sm"
-              className="col-span-2"
-              onClick={() => acceptOrder()}
-            >
-              <span>Simular: Técnico Acepta Solicitud y va en camino</span>
-            </Button>
+            <div className="col-span-2 p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-center space-y-1">
+              <p className="text-xs font-bold text-emerald-900">
+                📡 Esperando que un especialista verificado acepte tu solicitud...
+              </p>
+              <p className="text-[11px] text-emerald-700">
+                Tu orden está publicada en tiempo real en el panel de reparadores de tu especialidad. Esta pantalla se actualizará automáticamente en cuanto un técnico la tome.
+              </p>
+            </div>
           )}
 
           {status === "on_the_way" && (
@@ -137,7 +137,7 @@ export const TechnicianSheet: React.FC = () => {
                 onClick={simulateExtraCostProposal}
               >
                 <AlertTriangle className="w-3.5 h-3.5 mr-1" />
-                <span>Simular Imprevisto (+$14.50)</span>
+                <span>Simular Imprevisto (+$ 14.500 COP)</span>
               </Button>
 
               <Button

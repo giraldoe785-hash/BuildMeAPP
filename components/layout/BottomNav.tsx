@@ -9,6 +9,7 @@ export const BottomNav: React.FC = () => {
 
   const isTrackingActive =
     activeOrder && activeOrder.status !== "completed" && activeOrder.status !== "cancelled";
+  const isPaymentCaptured = activeOrder?.paymentStatus === "CAPTURADO";
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-30 flex justify-center pointer-events-none px-3 pb-3">
@@ -64,11 +65,19 @@ export const BottomNav: React.FC = () => {
           <div className="relative">
             <Navigation className="w-5 h-5 mb-0.5" />
             {isTrackingActive && (
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-orange-500 ring-2 ring-white animate-ping" />
+              <span
+                className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white animate-ping ${
+                  isPaymentCaptured ? "bg-orange-500" : "bg-amber-500"
+                }`}
+              />
             )}
           </div>
           <span className="text-[10px]">
-            {isTrackingActive ? "En Vivo" : "Rastreo"}
+            {isTrackingActive
+              ? isPaymentCaptured
+                ? "En Vivo"
+                : "Pago"
+              : "Rastreo"}
           </span>
         </button>
 
