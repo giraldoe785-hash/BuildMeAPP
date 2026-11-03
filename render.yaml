@@ -1,0 +1,69 @@
+# ==============================================================================
+# BuildMeAPP — Render Blueprint Specification (Free Tier)
+# ==============================================================================
+# Documentación oficial: https://render.com/docs/blueprint-spec
+# Presupuesto: USD 0 mensual (Plan Free en todas las capas)
+# Base de datos: Externa administrada en Neon PostgreSQL Free (sin costo)
+# Almacenamiento: Externo en Cloudflare R2 Free (sin costo dentro de cuota)
+# Correo: Resend HTTPS API Free (sin costo dentro de cuota)
+# Pagos: Wompi Sandbox exclusivamente (sin cobros reales)
+# ==============================================================================
+
+services:
+  - type: web
+    name: buildmeapp-demo
+    runtime: docker
+    plan: free
+    region: virginia
+    branch: deploy/render-free-7593392
+    dockerfilePath: ./Dockerfile
+    autoDeploy: false
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Neon PostgreSQL (cadena pooled con sslmode=require)
+      - key: DATABASE_URL
+        sync: false
+      # Autenticación y sesiones (generar con: openssl rand -hex 32)
+      - key: AUTH_SECRET
+        sync: false
+      # URL pública HTTPS provista por Render (ej: https://buildmeapp-demo.onrender.com)
+      - key: APP_BASE_URL
+        sync: false
+      # Almacenamiento privado Cloudflare R2
+      - key: STORAGE_PROVIDER
+        value: r2
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      # Correo transaccional mediante Resend HTTPS API (sin puertos SMTP)
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      # Pasarela de pagos Wompi Colombia (exclusivamente Sandbox / Pruebas)
+      - key: WOMPI_ENVIRONMENT
+        value: test
+      - key: NEXT_PUBLIC_WOMPI_PUBLIC_KEY
+        sync: false
+      - key: WOMPI_PRIVATE_KEY
+        sync: false
+      - key: WOMPI_INTEGRITY_SECRET
+        sync: false
+      - key: WOMPI_EVENTS_SECRET
+        sync: false
+      - key: WOMPI_API_URL
+        value: https://sandbox.wompi.co/v1
+      # Opciones de interfaz para demostración
+      - key: NEXT_PUBLIC_SHOW_DEMO_LOGIN
+        value: "true"

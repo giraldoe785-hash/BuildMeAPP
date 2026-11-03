@@ -1,15 +1,16 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { Resend } from "resend";
 
 import {
   classifyEmailError,
   isValidEmailFromFormat,
   publicMessageForCategory,
   type EmailFailureCategory,
-} from "@/lib/emailErrors";
+} from "./emailErrors";
 
 export type SendSuccess = {
   success: true;
-  /** Identificador del mensaje devuelto por el servidor SMTP. */
+  /** Identificador del mensaje devuelto por el servidor de correo (SMTP o Resend API). */
   providerMessageId: string;
 };
 
@@ -22,8 +23,23 @@ export type SendFailure = {
 
 export type SendEmailResult = SendSuccess | SendFailure;
 
+export type EmailProviderType = "resend" | "smtp";
+
 const GENERIC_EMAIL_SEND_ERROR =
   "No fue posible enviar el correo electrónico en este momento. Intenta de nuevo en unos minutos.";
+
+export function getEmailProvider(): EmailProviderType {
+  const provider = process.env.EMAIL_PROVIDER?.trim().toLowerCase();
+  if (provider === "resend") return "resend";
+  if (provider === "smtp") return "smtp";
+  if (process.env.RESEND_API_KEY?.trim()) return "resend";
+  return "smtp";
+}
+
+function getResendApiKey(): string | null {
+  const key = process.env.RESEND_API_KEY?.trim();
+  return key && key.length > 0 ? key : null;
+}
 
 function getEmailUser(): string | null {
   const user = process.env.EMAIL_USER?.trim();
@@ -41,14 +57,24 @@ function getEmailFrom(): string | null {
 }
 
 export function isEmailConfigComplete(): boolean {
+  const provider = getEmailProvider();
+  if (provider === "resend") {
+    return Boolean(getResendApiKey() && getEmailFrom());
+  }
   return Boolean(getEmailUser() && getEmailPass() && getEmailFrom());
 }
 
 let customTransportForTests: Transporter | null = null;
+let customResendClientForTests: Resend | null = null;
 
 /** Permite inyectar un transporte simulado en pruebas unitarias sin tocar la red. */
 export function setEmailTransportForTests(transport: Transporter | null): void {
   customTransportForTests = transport;
+}
+
+/** Permite inyectar un cliente Resend simulado en pruebas unitarias sin tocar la red. */
+export function setResendClientForTests(client: Resend | null): void {
+  customResendClientForTests = client;
 }
 
 function createGmailTransport(user: string, pass: string): Transporter {
@@ -68,16 +94,30 @@ function createGmailTransport(user: string, pass: string): Transporter {
 }
 
 /**
- * Comprueba la conexión y autenticación SMTP con Gmail sin enviar un correo real.
+ * Comprueba la conexión o configuración de correo sin enviar un correo real.
  * No imprime credenciales ni direcciones privadas.
  */
 export async function verifySmtpConnection(): Promise<
   | { success: true }
   | { success: false; category: EmailFailureCategory; safeMessage: string }
 > {
+  const provider = getEmailProvider();
+  const from = getEmailFrom();
+
+  if (provider === "resend") {
+    const key = getResendApiKey();
+    if (!key || !from) {
+      return {
+        success: false,
+        category: "invalid_credentials",
+        safeMessage: "Faltan variables RESEND_API_KEY o EMAIL_FROM.",
+      };
+    }
+    return { success: true };
+  }
+
   const user = getEmailUser();
   const pass = getEmailPass();
-  const from = getEmailFrom();
 
   if (!user || !pass || !from) {
     return {
@@ -209,11 +249,10 @@ function failure(
 }
 
 /**
- * Envío único mediante Nodemailer y Gmail SMTP para todos los correos de la app.
- * - Valida EMAIL_USER, EMAIL_PASS y EMAIL_FROM antes de abrir conexión SMTP.
- * - Comprueba que el servidor SMTP acepte el destinatario y devuelva `messageId`.
- * - Clasifica y sanea cualquier error del servidor SMTP (sin destinatarios,
- *   sin tokens/códigos y sin credenciales en los logs).
+ * Envío mediante Resend (HTTPS API) o Nodemailer (Gmail SMTP).
+ * - En Render / producción: usa Resend HTTPS API (puerto 443 estándar, sin bloqueo SMTP).
+ * - En local / desarrollo: fallback a Gmail SMTP cuando EMAIL_PROVIDER=smtp.
+ * - Clasifica y sanea cualquier error (sin tokens/códigos y sin credenciales en los logs).
  */
 async function deliverEmail(args: {
   context: DeliverContext;
@@ -224,13 +263,12 @@ async function deliverEmail(args: {
   exposeFailureDetail: boolean;
 }): Promise<SendEmailResult> {
   const tag = `[EmailService:${args.context}]`;
-  const user = getEmailUser();
-  const pass = getEmailPass();
   const from = getEmailFrom();
+  const provider = getEmailProvider();
 
-  if (!user || !pass || !from) {
+  if (!from) {
     console.error(
-      `${tag} Configuración incompleta: falta EMAIL_USER, EMAIL_PASS y/o EMAIL_FROM en el servidor.`
+      `${tag} Configuración incompleta: falta EMAIL_FROM en el servidor.`
     );
     return failure("not_configured", "invalid_credentials", GENERIC_EMAIL_SEND_ERROR);
   }
@@ -246,6 +284,56 @@ async function deliverEmail(args: {
         ? publicMessageForCategory("invalid_from")
         : GENERIC_EMAIL_SEND_ERROR
     );
+  }
+
+  // --- Rama Resend (HTTPS API para Render y producción) ---
+  if (provider === "resend") {
+    const apiKey = getResendApiKey();
+    if (!apiKey && !customResendClientForTests) {
+      console.error(
+        `${tag} Configuración incompleta: falta RESEND_API_KEY para enviar mediante Resend HTTPS API.`
+      );
+      return failure("not_configured", "invalid_credentials", GENERIC_EMAIL_SEND_ERROR);
+    }
+
+    try {
+      const resend = customResendClientForTests ?? new Resend(apiKey || undefined);
+      const { data, error } = await resend.emails.send({
+        from,
+        to: args.to,
+        subject: args.subject,
+        html: args.html,
+        text: args.text,
+      });
+
+      if (error || !data?.id) {
+        const errorMsg = error?.message || "Sin ID devuelto por la API de Resend";
+        console.error(`${tag} Error devuelto por Resend API | detalle="${errorMsg}"`);
+        return failure("send_failed", "unexpected_response", GENERIC_EMAIL_SEND_ERROR);
+      }
+
+      console.info(`${tag} Correo enviado exitosamente vía Resend HTTPS API | id=${data.id}`);
+      return { success: true, providerMessageId: data.id };
+    } catch (err: unknown) {
+      const safeMessage = err instanceof Error ? err.message : "Error desconocido";
+      console.error(`${tag} Excepción al invocar Resend API | detalle="${safeMessage}"`);
+      return failure(
+        "send_failed",
+        "unexpected_response",
+        args.exposeFailureDetail ? safeMessage : GENERIC_EMAIL_SEND_ERROR
+      );
+    }
+  }
+
+  // --- Rama Nodemailer (SMTP para desarrollo local) ---
+  const user = getEmailUser();
+  const pass = getEmailPass();
+
+  if (!user || !pass) {
+    console.error(
+      `${tag} Configuración incompleta: falta EMAIL_USER y/o EMAIL_PASS para el proveedor SMTP.`
+    );
+    return failure("not_configured", "invalid_credentials", GENERIC_EMAIL_SEND_ERROR);
   }
 
   try {
