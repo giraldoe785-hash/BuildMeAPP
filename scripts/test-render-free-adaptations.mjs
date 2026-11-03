@@ -2,24 +2,35 @@
  * scripts/test-render-free-adaptations.mjs
  *
  * Suite de validación automatizada para la adaptación a Render Free:
- * 1. Health Check (/api/health)
- * 2. Adaptador de almacenamiento Cloudflare R2 y fallback local (lib/storage.ts)
- * 3. Adaptador de correo Resend HTTPS API y fallback SMTP (lib/email.ts)
- * 4. Validación de especificación de Blueprint Render (render.yaml)
+ * 1. Health Check (/api/health) con verificación de proveedor de almacenamiento
+ * 2. Adaptador Supabase Storage (Free Tier - USD 0), variable canónica SUPABASE_SECRET_KEY y desactivación de R2
+ * 3. Operaciones de Supabase Storage con cliente mockeado y sin llamadas de red:
+ *    - Subida y descarga de acreditaciones y adjuntos con la misma clave
+ *    - Eliminación de archivos
+ *    - Validación estricta de rutas y rechazo de manipulación / traversal
+ *    - Límite de 10 MB y detección de tipo de archivo
+ *    - Compensación ante fallo de base de datos
+ * 4. Adaptador de correo Resend HTTPS API y fallback SMTP (lib/email.ts)
+ * 5. Validación de especificación de Blueprint Render (render.yaml) y Prisma 7 config
  */
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { registerHooks } from "node:module";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "@/types") {
-      return nextResolve("../types/index.ts", context);
+      const absPath = path.resolve(process.cwd(), "types/index.ts");
+      return nextResolve(pathToFileURL(absPath).href, context);
     }
     if (specifier.startsWith("@/")) {
-      return nextResolve("../" + specifier.slice(2) + ".ts", context);
+      const relPath = specifier.slice(2);
+      const absPath = path.resolve(process.cwd(), relPath + ".ts");
+      return nextResolve(pathToFileURL(absPath).href, context);
     }
     if (specifier.startsWith("./") || specifier.startsWith("../")) {
       if (!/\.(ts|js|mjs|json)$/.test(specifier)) {
@@ -34,7 +45,7 @@ registerHooks({
   },
 });
 
-console.log("=== INICIANDO VALIDACIÓN DE ADAPTACIÓN RENDER FREE (R2 + RESEND + NEON) ===");
+console.log("=== INICIANDO VALIDACIÓN DE ADAPTACIÓN RENDER FREE (SUPABASE STORAGE + RESEND + NEON) ===");
 
 // 1. Health Check
 test("1. Health Check (/api/health): formato de respuesta y ausencia de secretos", async () => {
@@ -47,89 +58,129 @@ test("1. Health Check (/api/health): formato de respuesta y ausencia de secretos
   assert.equal(data.app, "BuildMeAPP");
   assert.ok(data.version);
   assert.ok(data.timestamp);
+  assert.ok(data.storage, "Debe reportar el objeto storage");
+  assert.ok(data.storage.provider, "Debe indicar el proveedor de storage");
 
   // Asegurar que no se exponen credenciales ni URLs en la respuesta
   const text = JSON.stringify(data);
   assert.ok(!text.includes("postgresql:"), "No debe exponer cadenas de conexión");
+  assert.ok(!text.includes("sb_secret_"), "No debe exponer claves secretas");
   assert.ok(!text.includes("secret"), "No debe exponer secretos");
   assert.ok(!text.includes("password"), "No debe exponer contraseñas");
 });
 
-// 2. Adaptador de almacenamiento (lib/storage.ts)
-test("2. Almacenamiento: detección de proveedor y protección ante configuración R2 faltante", async () => {
+// 2. Selección de proveedor y reglas de entorno
+test("2. Almacenamiento: reglas de selección, variable canónica SUPABASE_SECRET_KEY y rechazo de R2 en producción", async () => {
   const storage = await import("../lib/storage.ts");
 
-  // Proveedor por defecto en local
   const prevProvider = process.env.STORAGE_PROVIDER;
-  const prevBucket = process.env.R2_BUCKET_NAME;
-  const prevAccount = process.env.R2_ACCOUNT_ID;
+  const prevNodeEnv = process.env.NODE_ENV;
+  const prevSupabaseUrl = process.env.SUPABASE_URL;
+  const prevSupabaseKey = process.env.SUPABASE_SECRET_KEY;
 
   try {
     delete process.env.STORAGE_PROVIDER;
-    delete process.env.R2_BUCKET_NAME;
-    delete process.env.R2_ACCOUNT_ID;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SECRET_KEY;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.NODE_ENV = "development";
 
+    // En desarrollo: por defecto es local
     assert.equal(storage.getStorageProvider(), "local");
 
-    // Configurado explícitamente a R2 pero sin credenciales -> debe lanzar error controlado
-    process.env.STORAGE_PROVIDER = "r2";
-    assert.equal(storage.getStorageProvider(), "r2");
+    // En desarrollo: si se configura supabase explícitamente
+    process.env.STORAGE_PROVIDER = "supabase";
+    assert.equal(storage.getStorageProvider(), "supabase");
 
+    // En producción (Render Free): STORAGE_PROVIDER=r2 debe ser RECHAZADO por regla de USD 0
+    process.env.NODE_ENV = "production";
+    process.env.STORAGE_PROVIDER = "r2";
+    assert.throws(
+      () => storage.getStorageProvider(),
+      (err) => {
+        assert.equal(err.name, "StorageConfigurationError");
+        assert.equal(err.code, "R2_DEACTIVATED_FOR_FREE_TIER");
+        return true;
+      }
+    );
+
+    // En producción: fallback a local está estrictamente prohibido
+    process.env.STORAGE_PROVIDER = "local";
+    assert.throws(
+      () => storage.getStorageProvider(),
+      (err) => {
+        assert.equal(err.name, "StorageConfigurationError");
+        assert.equal(err.code, "LOCAL_STORAGE_FORBIDDEN_IN_PRODUCTION");
+        return true;
+      }
+    );
+
+    // En producción: supabase configurado pero sin credenciales -> getStorageProvider devuelve supabase
+    process.env.STORAGE_PROVIDER = "supabase";
+    assert.equal(storage.getStorageProvider(), "supabase");
+
+    // Pero al intentar usar el cliente sin credenciales debe lanzar error controlado
     await assert.rejects(
       async () => {
         await storage.saveAccreditationFile(Buffer.from("dummy-pdf"), "pdf");
       },
       (err) => {
         assert.equal(err.name, "StorageConfigurationError");
-        assert.equal(err.code, "R2_CONFIGURATION_MISSING");
+        assert.equal(err.code, "SUPABASE_CONFIGURATION_MISSING");
         return true;
       }
     );
   } finally {
     if (prevProvider) process.env.STORAGE_PROVIDER = prevProvider;
     else delete process.env.STORAGE_PROVIDER;
-    if (prevBucket) process.env.R2_BUCKET_NAME = prevBucket;
-    else delete process.env.R2_BUCKET_NAME;
-    if (prevAccount) process.env.R2_ACCOUNT_ID = prevAccount;
-    else delete process.env.R2_ACCOUNT_ID;
+    if (prevNodeEnv) process.env.NODE_ENV = prevNodeEnv;
+    else delete process.env.NODE_ENV;
+    if (prevSupabaseUrl) process.env.SUPABASE_URL = prevSupabaseUrl;
+    else delete process.env.SUPABASE_URL;
+    if (prevSupabaseKey) process.env.SUPABASE_SECRET_KEY = prevSupabaseKey;
+    else delete process.env.SUPABASE_SECRET_KEY;
   }
 });
 
-test("3. Almacenamiento: operaciones en Cloudflare R2 con cliente S3 inyectado", async () => {
+// 3. Operaciones de Supabase Storage con cliente mockeado y validación de claves
+test("3. Supabase Storage: subida, descarga y eliminación con la misma clave, validación estricta y compensación", async () => {
   const storage = await import("../lib/storage.ts");
 
-  let uploadedCommand = null;
-  let fetchedKey = null;
-  let deletedKey = null;
+  let uploadParams = null;
+  let downloadedKey = null;
+  let removedKeys = null;
 
-  // Mock del cliente S3
-  const mockS3Client = {
-    send: async (command) => {
-      const name = command?.constructor?.name || "";
-      if (name.includes("PutObject") || command.input?.Body !== undefined) {
-        uploadedCommand = command.input;
-        return {};
-      }
-      if (name.includes("DeleteObject")) {
-        deletedKey = command.input?.Key;
-        return {};
-      }
-      if (name.includes("GetObject") || command.input?.Key) {
-        fetchedKey = command.input.Key;
-        return {
-          Body: {
-            transformToByteArray: async () => new Uint8Array(Buffer.from("fake-r2-pdf-bytes")),
-          },
-        };
-      }
-      return {};
+  const mockSupabaseClient = {
+    storage: {
+      from: (bucket) => ({
+        upload: async (key, buffer, options) => {
+          uploadParams = { bucket, key, buffer, options };
+          return { data: { path: key }, error: null };
+        },
+        download: async (key) => {
+          downloadedKey = key;
+          return {
+            data: {
+              arrayBuffer: async () => Buffer.from("fake-supabase-pdf-bytes"),
+            },
+            error: null,
+          };
+        },
+        remove: async (keys) => {
+          removedKeys = keys;
+          return { data: keys, error: null };
+        },
+      }),
     },
   };
 
   const prevProvider = process.env.STORAGE_PROVIDER;
+  const prevNodeEnv = process.env.NODE_ENV;
+
   try {
-    process.env.STORAGE_PROVIDER = "r2";
-    storage.setS3ClientForTests(mockS3Client);
+    process.env.STORAGE_PROVIDER = "supabase";
+    process.env.NODE_ENV = "production";
+    storage.setSupabaseClientForTests(mockSupabaseClient);
 
     // 1. Guardar archivo de acreditación
     const dummyBuffer = Buffer.from("pdf-content-test");
@@ -137,21 +188,118 @@ test("3. Almacenamiento: operaciones en Cloudflare R2 con cliente S3 inyectado",
 
     assert.ok(key.startsWith("acreditaciones/"));
     assert.ok(key.endsWith(".pdf"));
-    assert.equal(uploadedCommand.Key, key);
-    assert.equal(uploadedCommand.ContentType, "application/pdf");
+    assert.equal(uploadParams.bucket, "buildmeapp-private-documents");
+    assert.equal(uploadParams.key, key);
+    assert.equal(uploadParams.options.contentType, "application/pdf");
+    assert.equal(uploadParams.options.upsert, false);
 
-    // 2. Leer archivo
-    const readBuffer = await storage.readStoredFile(key);
-    assert.equal(fetchedKey, key);
-    assert.equal(readBuffer.toString(), "fake-r2-pdf-bytes");
+    // 2. Descargar archivo usando EXACTAMENTE la misma clave
+    const downloadedBuffer = await storage.readStoredFile(key);
+    assert.equal(downloadedKey, key, "Debe descargar exactamente la misma clave generada");
+    assert.equal(downloadedBuffer.toString(), "fake-supabase-pdf-bytes");
 
-    // 3. Eliminar archivo
+    // 3. Eliminar archivo usando EXACTAMENTE la misma clave
     await storage.deleteStoredFile(key);
-    assert.equal(deletedKey, key);
+    assert.deepEqual(removedKeys, [key], "Debe eliminar exactamente la misma clave");
+
+    // 4. Guardar adjunto de soporte
+    const ticketBuffer = Buffer.from("ticket-png-content");
+    const ticketKey = await storage.saveSupportAttachment(ticketBuffer, "png");
+    assert.ok(ticketKey.startsWith("soporte/"));
+    assert.ok(ticketKey.endsWith(".png"));
+    assert.equal(uploadParams.key, ticketKey);
+    assert.equal(uploadParams.options.contentType, "image/png");
+
+    // 5. Descargar y eliminar adjunto de soporte con la misma clave
+    const ticketDownloaded = await storage.readStoredFile(ticketKey);
+    assert.equal(downloadedKey, ticketKey);
+    assert.equal(ticketDownloaded.toString(), "fake-supabase-pdf-bytes");
+    await storage.deleteStoredFile(ticketKey);
+    assert.deepEqual(removedKeys, [ticketKey]);
+
+    // 6. Validación estricta de rutas de almacenamiento:
+    // Formatos válidos:
+    assert.equal(storage.isValidStorageKey("acreditaciones/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11.pdf"), true);
+    assert.equal(storage.isValidStorageKey("soporte/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11.png"), true);
+    assert.equal(storage.isValidStorageKey("soporte/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11.jpg"), true);
+
+    // Formatos inválidos / manipulados:
+    assert.equal(storage.isValidStorageKey("../etc/passwd"), false);
+    assert.equal(storage.isValidStorageKey("acreditaciones/../passwd"), false);
+    assert.equal(storage.isValidStorageKey("acreditaciones\\uuid.pdf"), false);
+    assert.equal(storage.isValidStorageKey("invalido/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11.pdf"), false);
+    assert.equal(storage.isValidStorageKey("acreditaciones/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11.exe"), false);
+    assert.equal(storage.isValidStorageKey("/acreditaciones/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11.pdf"), false);
+
+    // Intentar leer con clave manipulada debe ser rechazado inmediatamente
+    await assert.rejects(
+      async () => {
+        await storage.readStoredFile("../etc/passwd");
+      },
+      /Ruta de archivo inválida/
+    );
+
+    // 7. Archivo que supera el límite de 10 MB debe ser rechazado antes de la subida
+    const oversizedBuffer = Buffer.alloc(11 * 1024 * 1024);
+    await assert.rejects(
+      async () => {
+        await storage.saveAccreditationFile(oversizedBuffer, "pdf");
+      },
+      /excede el tamaño máximo/
+    );
+
+    // 8. Compensación en fallo de base de datos simulado:
+    // Si la DB falla tras crear el archivo, deleteStoredFile limpia el archivo
+    let compensatedKey = null;
+    const compensationMock = {
+      storage: {
+        from: () => ({
+          upload: async (k) => ({ data: { path: k }, error: null }),
+          remove: async (keys) => {
+            compensatedKey = keys[0];
+            return { data: keys, error: null };
+          },
+        }),
+      },
+    };
+    storage.setSupabaseClientForTests(compensationMock);
+
+    let savedKey = null;
+    try {
+      savedKey = await storage.saveAccreditationFile(dummyBuffer, "pdf");
+      // Simular fallo en inserción PostgreSQL
+      throw new Error("DB_WRITE_FAILURE");
+    } catch {
+      if (savedKey) {
+        await storage.deleteStoredFile(savedKey);
+      }
+    }
+    assert.equal(compensatedKey, savedKey, "El archivo debe ser eliminado como compensación");
+
+    // 9. Error devuelto por Supabase al subir debe propagarse como excepción clara
+    const failingMock = {
+      storage: {
+        from: () => ({
+          upload: async () => ({
+            data: null,
+            error: { message: "Bucket quota exceeded or storage down" },
+          }),
+        }),
+      },
+    };
+    storage.setSupabaseClientForTests(failingMock);
+    await assert.rejects(
+      async () => {
+        await storage.saveAccreditationFile(dummyBuffer, "pdf");
+      },
+      /Error al almacenar archivo en Supabase Storage/
+    );
   } finally {
-    storage.setS3ClientForTests(null);
+    storage.resetStorageClientsForTests();
     if (prevProvider) process.env.STORAGE_PROVIDER = prevProvider;
     else delete process.env.STORAGE_PROVIDER;
+    if (prevNodeEnv) process.env.NODE_ENV = prevNodeEnv;
+    else delete process.env.NODE_ENV;
   }
 });
 
@@ -205,8 +353,8 @@ test("4. Correo: detección de proveedor Resend y envío mediante HTTPS API mock
   }
 });
 
-// 5. Validación de Blueprint Render (render.yaml)
-test("5. Render Blueprint: validación de estructura Free Tier y cero secretos en Git", () => {
+// 5. Validación de Blueprint Render (render.yaml) y configuración de Neon / Prisma 7
+test("5. Render Blueprint y Prisma 7: validación de estructura Free Tier, variables de Neon y cero secretos en Git", () => {
   assert.ok(fs.existsSync("render.yaml"), "render.yaml debe existir en la raíz");
   const content = fs.readFileSync("render.yaml", "utf8");
 
@@ -216,16 +364,35 @@ test("5. Render Blueprint: validación de estructura Free Tier y cero secretos e
   assert.ok(content.includes("branch: deploy/render-free-7593392"), "Debe apuntar a la rama de despliegue");
   assert.ok(content.includes("healthCheckPath: /api/health"), "Debe configurar /api/health");
   assert.ok(content.includes("autoDeploy: false"), "Debe tener autoDeploy: false");
+
+  // Almacenamiento Supabase Storage con clave canónica SUPABASE_SECRET_KEY
   assert.ok(content.includes("STORAGE_PROVIDER"));
+  assert.ok(content.includes("value: supabase"));
+  assert.ok(content.includes("SUPABASE_URL"));
+  assert.ok(content.includes("SUPABASE_SECRET_KEY"));
+  assert.ok(content.includes("SUPABASE_STORAGE_BUCKET"));
+  assert.ok(content.includes("buildmeapp-private-documents"));
+
+  // Base de datos Neon: conexión pooled y direct
+  assert.ok(content.includes("DATABASE_URL"));
+  assert.ok(content.includes("DIRECT_URL"));
+
+  // R2 NO debe estar presente en las variables activas del blueprint
+  assert.ok(!content.includes("R2_ACCESS_KEY_ID"), "R2_ACCESS_KEY_ID no debe estar en render.yaml");
+  assert.ok(!content.includes("R2_SECRET_ACCESS_KEY"), "R2_SECRET_ACCESS_KEY no debe estar en render.yaml");
+  assert.ok(!content.includes("R2_ACCOUNT_ID"), "R2_ACCOUNT_ID no debe estar en render.yaml");
+
+  // Correo y Pagos
   assert.ok(content.includes("EMAIL_PROVIDER"));
   assert.ok(content.includes("WOMPI_ENVIRONMENT"));
 
   // Verificación de que todos los secretos usan sync: false y no tienen valores hardcodeados
   const secretKeys = [
     "DATABASE_URL",
+    "DIRECT_URL",
     "AUTH_SECRET",
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
+    "SUPABASE_URL",
+    "SUPABASE_SECRET_KEY",
     "RESEND_API_KEY",
     "WOMPI_PRIVATE_KEY",
     "WOMPI_INTEGRITY_SECRET",
@@ -235,6 +402,14 @@ test("5. Render Blueprint: validación de estructura Free Tier y cero secretos e
     const regex = new RegExp(`key:\\s*${key}[\\s\\S]*?sync:\\s*false`);
     assert.ok(regex.test(content), `El secreto ${key} debe declararse con sync: false`);
   }
+
+  // Verificación de prisma7.config.ts
+  assert.ok(fs.existsSync("prisma7.config.ts"), "prisma7.config.ts debe existir");
+  const prisma7Content = fs.readFileSync("prisma7.config.ts", "utf8");
+  assert.ok(
+    prisma7Content.includes("DIRECT_URL"),
+    "prisma7.config.ts debe incluir DIRECT_URL para migraciones y CLI"
+  );
 });
 
 console.log("=== TODAS LAS PRUEBAS DE ADAPTACIÓN RENDER FREE PASARON EXITOSAMENTE ===");

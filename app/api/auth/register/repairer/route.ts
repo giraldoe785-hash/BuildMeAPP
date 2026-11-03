@@ -284,6 +284,10 @@ export async function POST(request: Request) {
     // Si el archivo ya se guardó pero la cuenta no se creó, se borra para no dejar archivos huérfanos.
     if (storedKey) await deleteStoredFile(storedKey);
 
+    if ((error as { name?: string }).name === "StorageConfigurationError") {
+      return fail("El servicio de almacenamiento no está disponible o no ha sido configurado.", 503);
+    }
+
     if ((error as { code?: string }).code === "P2002") {
       return fail("El usuario o el documento ya están registrados.", 409);
     }

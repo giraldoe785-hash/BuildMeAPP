@@ -99,12 +99,28 @@ export async function GET(
           "Content-Disposition": `${disposition}; filename="${encodeURIComponent(safeFileName)}"`,
         },
       });
-    } catch {
+    } catch (readErr: unknown) {
+      const errorObj = readErr as { name?: string; code?: string };
+      if (
+        errorObj?.name === "StorageConfigurationError" ||
+        errorObj?.code === "SUPABASE_CONFIGURATION_MISSING" ||
+        errorObj?.code === "R2_DEACTIVATED_FOR_FREE_TIER" ||
+        errorObj?.code === "LOCAL_STORAGE_FORBIDDEN_IN_PRODUCTION"
+      ) {
+        return jsonResponse(
+          {
+            success: false,
+            code: "STORAGE_NOT_CONFIGURED",
+            message: "El servicio de almacenamiento no está disponible o no ha sido configurado.",
+          },
+          503
+        );
+      }
       return jsonResponse(
         {
           success: false,
-          code: "FILE_NOT_FOUND_ON_DISK",
-          message: "El archivo físico no fue encontrado en el almacenamiento local.",
+          code: "FILE_NOT_FOUND",
+          message: "El archivo físico no fue encontrado en el almacenamiento.",
         },
         404
       );
