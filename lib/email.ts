@@ -3,6 +3,7 @@ import { Resend } from "resend";
 
 import {
   classifyEmailError,
+  classifyResendError,
   isValidEmailFromFormat,
   publicMessageForCategory,
   type EmailFailureCategory,
@@ -307,20 +308,26 @@ async function deliverEmail(args: {
       });
 
       if (error || !data?.id) {
-        const errorMsg = error?.message || "Sin ID devuelto por la API de Resend";
-        console.error(`${tag} Error devuelto por Resend API | detalle="${errorMsg}"`);
-        return failure("send_failed", "unexpected_response", GENERIC_EMAIL_SEND_ERROR);
+        const errorInfo = classifyResendError(error || { message: "Sin ID devuelto por la API de Resend" });
+        console.error(
+          `${tag} Error devuelto por Resend API | categoria=${errorInfo.category} | detalle="${errorInfo.safeMessage}"`
+        );
+        const userMsg = publicMessageForCategory(errorInfo.category);
+        return failure("send_failed", errorInfo.category, userMsg);
       }
 
       console.info(`${tag} Correo enviado exitosamente vía Resend HTTPS API | id=${data.id}`);
       return { success: true, providerMessageId: data.id };
     } catch (err: unknown) {
-      const safeMessage = err instanceof Error ? err.message : "Error desconocido";
-      console.error(`${tag} Excepción al invocar Resend API | detalle="${safeMessage}"`);
+      const errorInfo = classifyResendError(err);
+      console.error(
+        `${tag} Excepción al invocar Resend API | categoria=${errorInfo.category} | detalle="${errorInfo.safeMessage}"`
+      );
+      const userMsg = publicMessageForCategory(errorInfo.category);
       return failure(
         "send_failed",
-        "unexpected_response",
-        args.exposeFailureDetail ? safeMessage : GENERIC_EMAIL_SEND_ERROR
+        errorInfo.category,
+        userMsg
       );
     }
   }
